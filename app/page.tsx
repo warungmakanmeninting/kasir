@@ -30,16 +30,45 @@ export default function HomePage() {
   }, [])
 
   const handleLogout = async () => {
-    if (!supabaseClient) {
-      router.replace("/login")
-      return
-    }
-
     try {
       setLoggingOut(true)
-      await supabaseClient.auth.signOut()
+      
+      // Always try to sign out, even if client is not available
+      if (supabaseClient) {
+        try {
+          await supabaseClient.auth.signOut()
+        } catch (signOutError) {
+          // If signOut fails (e.g., invalid token), clear local storage manually
+          console.error("[Logout] Sign out error:", signOutError)
+          if (typeof window !== "undefined") {
+            // Clear Supabase session from localStorage
+            const keys = Object.keys(localStorage)
+            keys.forEach((key) => {
+              if (key.includes("supabase") || key.includes("auth-token")) {
+                localStorage.removeItem(key)
+              }
+            })
+            // Clear sessionStorage too
+            sessionStorage.clear()
+          }
+        }
+      } else {
+        // If supabase client is not available, clear storage manually
+        if (typeof window !== "undefined") {
+          localStorage.clear()
+          sessionStorage.clear()
+        }
+      }
+      
+      // Always redirect to login
       router.replace("/login")
-    } catch {
+    } catch (err) {
+      console.error("[Logout] Unexpected error:", err)
+      // Clear storage on error
+      if (typeof window !== "undefined") {
+        localStorage.clear()
+        sessionStorage.clear()
+      }
       router.replace("/login")
     } finally {
       setLoggingOut(false)

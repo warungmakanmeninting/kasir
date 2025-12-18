@@ -20,6 +20,8 @@ export const metadata: Metadata = {
   },
 }
 
+import { ClientWrapper } from "@/components/client-wrapper"
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -29,7 +31,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={`font-sans antialiased`}>
         <StoreProvider>
-          <AuthGuard>{children}</AuthGuard>
+          <AuthGuard>
+            <ClientWrapper>{children}</ClientWrapper>
+          </AuthGuard>
         </StoreProvider>
         <Toaster />
         <Analytics />

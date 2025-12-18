@@ -36,7 +36,17 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         } = await supabaseClient.auth.getSession()
 
         if (error) {
-          // Jika gagal cek sesi (misal network error), paksa ke halaman login
+          // Jika error karena invalid token, clear session dan redirect ke login
+          console.error("[AuthGuard] Session error:", error.message)
+          if (error.message.includes("Invalid") || error.message.includes("expired") || error.message.includes("token")) {
+            // Clear invalid session
+            try {
+              await supabaseClient.auth.signOut()
+            } catch (signOutError) {
+              // Ignore signOut errors
+            }
+          }
+          
           if (!isPublicPath) {
             router.replace("/login")
             return
@@ -61,27 +71,54 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
         // Check role-based access for protected paths
         if (session && !isPublicPath) {
-          const role = await getUserRole()
-          
-          if (!role) {
-            router.replace("/login")
-            return
-          }
+          try {
+            const role = await getUserRole()
+            
+            if (!role) {
+              // Invalid role, clear session and redirect
+              await supabaseClient.auth.signOut()
+              router.replace("/login")
+              return
+            }
 
-          // Check if user can access this route
-          if (!canAccessRoute(role, pathname)) {
-            // Redirect to default route for their role
-            const defaultRoute = getDefaultRouteForRole(role)
-            router.replace(defaultRoute)
-            return
+            // Check if user can access this route
+            if (!canAccessRoute(role, pathname)) {
+              // Redirect to default route for their role
+              const defaultRoute = getDefaultRouteForRole(role)
+              router.replace(defaultRoute)
+              return
+            }
+          } catch (roleError: any) {
+            // If error getting role (e.g., invalid token), clear session and redirect
+            console.error("[AuthGuard] Role check error:", roleError?.message)
+            if (roleError?.message?.includes("Invalid") || roleError?.message?.includes("token") || roleError?.message?.includes("401")) {
+              try {
+                await supabaseClient.auth.signOut()
+              } catch (signOutError) {
+                // Ignore signOut errors
+              }
+              router.replace("/login")
+              return
+            }
           }
         }
 
         if (isMounted) {
           setIsReady(true)
         }
-      } catch {
-        // Error tak terduga saat cek sesi: amankan dengan redirect ke login
+      } catch (err: any) {
+        // Error tak terduga saat cek sesi: clear session dan redirect ke login
+        console.error("[AuthGuard] Unexpected error:", err?.message)
+        
+        // If it's a token-related error, clear session
+        if (err?.message?.includes("Invalid") || err?.message?.includes("token") || err?.message?.includes("401") || err?.message?.includes("403")) {
+          try {
+            await supabaseClient.auth.signOut()
+          } catch (signOutError) {
+            // Ignore signOut errors
+          }
+        }
+        
         if (!isPublicPath) {
           router.replace("/login")
           return
@@ -93,8 +130,18 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     checkSession()
 
+    // Listen for auth state changes (e.g., when user logs out from another device)
+    const {
+      data: { subscription },
+    } = supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || (!session && !PUBLIC_PATHS.includes(pathname))) {
+        router.replace("/login")
+      }
+    })
+
     return () => {
       isMounted = false
+      subscription.unsubscribe()
     }
   }, [pathname, router])
 

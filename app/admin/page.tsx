@@ -61,10 +61,23 @@ export default function AdminDashboardPage() {
         // Load session
         const {
           data: { session },
+          error: sessionError,
         } = await supabaseClient.auth.getSession()
 
+        if (sessionError) {
+          // If session error (invalid token), clear session and redirect
+          console.error("[Admin Dashboard] Session error:", sessionError.message)
+          try {
+            await supabaseClient.auth.signOut()
+          } catch (signOutError) {
+            // Ignore signOut errors
+          }
+          window.location.href = "/login"
+          return
+        }
+
         if (!session) {
-          setError("Sesi login tidak ditemukan. Silakan login kembali.")
+          window.location.href = "/login"
           return
         }
 
@@ -77,6 +90,22 @@ export default function AdminDashboardPage() {
 
         const ordersJson = await ordersRes.json()
         if (!ordersRes.ok) {
+          // Check if error is due to invalid token
+          if (ordersJson.error?.includes("Invalid access token") || ordersJson.error?.includes("token") || ordersRes.status === 401) {
+            console.error("[Admin Dashboard] Invalid token, signing out")
+            try {
+              await supabaseClient.auth.signOut()
+            } catch (signOutError) {
+              // Ignore signOut errors
+            }
+            // Clear storage manually
+            if (typeof window !== "undefined") {
+              localStorage.clear()
+              sessionStorage.clear()
+            }
+            window.location.href = "/login"
+            return
+          }
           throw new Error(ordersJson.error ?? "Gagal memuat pesanan")
         }
 
@@ -141,6 +170,24 @@ export default function AdminDashboardPage() {
         setOrders(ordersWithCategories)
         setProducts(productsData)
       } catch (err: any) {
+        // Check if error is due to invalid token
+        if (err?.message?.includes("Invalid") || err?.message?.includes("token") || err?.message?.includes("401")) {
+          console.error("[Admin Dashboard] Token error, signing out:", err?.message)
+          try {
+            if (supabaseClient) {
+              await supabaseClient.auth.signOut()
+            }
+          } catch (signOutError) {
+            // Ignore signOut errors
+          }
+          // Clear storage manually
+          if (typeof window !== "undefined") {
+            localStorage.clear()
+            sessionStorage.clear()
+          }
+          window.location.href = "/login"
+          return
+        }
         setError(err?.message ?? "Gagal memuat data dashboard")
         console.error("Error loading dashboard data:", err)
       } finally {

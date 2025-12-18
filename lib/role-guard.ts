@@ -11,7 +11,13 @@ export async function getUserRole(): Promise<UserRole | null> {
   try {
     const {
       data: { session },
+      error: sessionError,
     } = await supabaseClient.auth.getSession()
+
+    if (sessionError) {
+      // If session error (e.g., invalid token), return null
+      throw sessionError
+    }
 
     if (!session) return null
 
@@ -21,10 +27,17 @@ export async function getUserRole(): Promise<UserRole | null> {
       .eq("id", session.user.id)
       .single()
 
-    if (error || !profile || !profile.is_active) return null
+    if (error) {
+      // If error (could be invalid token or permission issue), throw to be caught
+      throw error
+    }
+
+    if (!profile || !profile.is_active) return null
 
     return profile.role as UserRole
-  } catch {
+  } catch (error: any) {
+    // Return null on any error (including invalid token)
+    console.error("[getUserRole] Error:", error?.message)
     return null
   }
 }
