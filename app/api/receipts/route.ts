@@ -11,6 +11,63 @@ function getAdminClient() {
   return createClient(supabaseUrl, serviceRoleKey)
 }
 
+export async function GET(req: NextRequest) {
+  try {
+    const supabase = getAdminClient()
+
+    const authHeader = req.headers.get("authorization") ?? ""
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null
+    if (!token) {
+      return NextResponse.json({ error: "Missing access token" }, { status: 401 })
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser(token)
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Invalid access token" }, { status: 401 })
+    }
+
+    // Get user role
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single()
+
+    const userRole = profile?.role || "cashier"
+
+    const { searchParams } = new URL(req.url)
+    const limit = Number(searchParams.get("limit") ?? "10")
+
+    // Build query
+    let query = supabase
+      .from("receipts")
+      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type")
+      .order("printed_at", { ascending: false })
+      .limit(Number.isFinite(limit) && limit > 0 ? limit : 10)
+
+    // If cashier, only show receipts they printed
+    // Admin and manager can see all receipts
+    if (userRole === "cashier") {
+      query = query.eq("printed_by", user.id)
+    }
+
+    const { data, error } = await query
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ receipts: data ?? [] })
+  } catch (err: any) {
+    console.error("[RECEIPTS API] Error in GET:", err)
+    return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 })
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = getAdminClient()

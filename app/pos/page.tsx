@@ -141,7 +141,7 @@ export default function POSPage() {
 
         if (!session) return
 
-        const res = await fetch("/api/admin/receipts?limit=10", {
+        const res = await fetch("/api/receipts?limit=10", {
           headers: {
             Authorization: `Bearer ${session.access_token}`,
           },
@@ -737,7 +737,7 @@ export default function POSPage() {
       }
 
       // Get receipt detail with order data
-      const res = await fetch(`/api/admin/receipts/${receiptId}`, {
+      const res = await fetch(`/api/receipts/${receiptId}`, {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
@@ -803,7 +803,7 @@ export default function POSPage() {
       }
 
       // Refresh receipt history
-      const historyRes = await fetch("/api/admin/receipts?limit=10", {
+      const historyRes = await fetch("/api/receipts?limit=10", {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
@@ -852,7 +852,7 @@ export default function POSPage() {
       }
 
       // Get receipt detail with order data
-      const res = await fetch(`/api/admin/receipts/${receiptId}`, {
+      const res = await fetch(`/api/receipts/${receiptId}`, {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
