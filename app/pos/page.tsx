@@ -17,9 +17,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { useStore } from "@/lib/store"
 import type { OrderItem } from "@/lib/types"
-import { Minus, Plus, ShoppingCart, Trash2, X, ArrowLeft, Printer, Search } from "lucide-react"
+import { Minus, Plus, ShoppingCart, Trash2, X, ArrowLeft, Printer, Search, History, RotateCcw, Eye, XCircle } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { supabaseClient } from "@/lib/supabaseClient"
@@ -84,6 +102,17 @@ export default function POSPage() {
   const [isVariantDialogOpen, setIsVariantDialogOpen] = useState(false)
   const [selectedProductForVariant, setSelectedProductForVariant] = useState<ProductRow | null>(null)
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
+  const [showPrinterAlert, setShowPrinterAlert] = useState(false)
+  const [receiptHistory, setReceiptHistory] = useState<Array<{ id: string; receipt_number: number | null; order_id: string; printed_at: string }>>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [reprintingReceiptId, setReprintingReceiptId] = useState<string | null>(null)
+  const [cancellingReceiptId, setCancellingReceiptId] = useState<string | null>(null)
+  const [selectedReceiptForDetail, setSelectedReceiptForDetail] = useState<string | null>(null)
+  const [receiptDetailData, setReceiptDetailData] = useState<any>(null)
+  const [isReceiptDetailOpen, setIsReceiptDetailOpen] = useState(false)
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
+  const [showPrinterConnectConfirm, setShowPrinterConnectConfirm] = useState(false)
 
   // Check role authorization
   useEffect(() => {
@@ -98,6 +127,39 @@ export default function POSPage() {
     }
     checkRole()
   }, [router])
+
+  // Load receipt history
+  useEffect(() => {
+    const loadReceiptHistory = async () => {
+      if (!supabaseClient) return
+
+      try {
+        setLoadingHistory(true)
+        const {
+          data: { session },
+        } = await supabaseClient.auth.getSession()
+
+        if (!session) return
+
+        const res = await fetch("/api/admin/receipts?limit=10", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        })
+
+        if (res.ok) {
+          const json = await res.json()
+          setReceiptHistory(json.receipts ?? [])
+        }
+      } catch (err) {
+        console.error("[POS] Error loading receipt history:", err)
+      } finally {
+        setLoadingHistory(false)
+      }
+    }
+
+    loadReceiptHistory()
+  }, [])
 
   useEffect(() => {
     const loadData = async () => {
@@ -539,36 +601,68 @@ export default function POSPage() {
 
       // Print receipt if printer connected and auto-print enabled
       const shouldAutoPrint = settings?.auto_print_receipt ?? true
-      if (printerConnected && shouldAutoPrint) {
-        const printer = getPrinterInstance()
-        const receiptData: ReceiptData = {
-          receiptNumber,
-          orderDate: new Date(),
-          customerName: customerName || undefined,
-          tableNumber: tableNumber || undefined,
-          items: cart.map((item) => ({
-            name: item.productName,
-            quantity: item.quantity,
-            price: item.price,
-            total: item.price * item.quantity,
-          })),
-          subtotal,
-          tax,
-          total,
-          paymentMethod: paymentMethod.name,
-          cashier: session.user.user_metadata?.full_name || session.user.email || "Kasir",
-          restaurantName: settings?.restaurant_name,
-          restaurantAddress: settings?.restaurant_address,
-          restaurantPhone: settings?.restaurant_phone,
-          footerMessage: settings?.receipt_footer,
-          taxRate: settings?.tax_rate,
-        }
+      
+      if (shouldAutoPrint) {
+        if (!printerConnected) {
+          // Show alert dialog to connect printer
+          setShowPrinterAlert(true)
+        } else {
+          // Print receipt - ensure it only runs in browser/client-side
+          // Check if we're in browser environment and Bluetooth is available
+          if (typeof window !== "undefined" && typeof navigator !== "undefined" && "bluetooth" in navigator) {
+            try {
+              // Use setTimeout to ensure print happens after UI updates
+              setTimeout(async () => {
+                try {
+                  const printer = getPrinterInstance()
+                  const receiptData: ReceiptData = {
+                    receiptNumber,
+                    orderDate: new Date(),
+                    customerName: customerName || undefined,
+                    tableNumber: tableNumber || undefined,
+                    items: cart.map((item) => ({
+                      name: item.productName,
+                      quantity: item.quantity,
+                      price: item.price,
+                      total: item.price * item.quantity,
+                    })),
+                    subtotal,
+                    tax,
+                    total,
+                    paymentMethod: paymentMethod.name,
+                    cashier: session.user.user_metadata?.full_name || session.user.email || "Kasir",
+                    restaurantName: settings?.restaurant_name,
+                    restaurantAddress: settings?.restaurant_address,
+                    restaurantPhone: settings?.restaurant_phone,
+                    footerMessage: settings?.receipt_footer,
+                    taxRate: settings?.tax_rate,
+                  }
 
-        const printed = await printer.printReceipt(receiptData)
-        if (!printed) {
-          toast.error("Gagal mencetak struk", {
-            description: "Pastikan printer terhubung dan siap.",
-          })
+                  const printed = await printer.printReceipt(receiptData)
+                  if (!printed) {
+                    toast.error("Gagal mencetak struk", {
+                      description: "Pastikan printer terhubung dan siap.",
+                    })
+                  } else {
+                    toast.success("Struk berhasil dicetak")
+                  }
+                } catch (printError: any) {
+                  console.error("[POS] Print error:", printError)
+                  toast.error("Gagal mencetak struk", {
+                    description: printError?.message || "Terjadi kesalahan saat mencetak.",
+                  })
+                }
+              }, 100) // Small delay to ensure UI is ready
+            } catch (setupError: any) {
+              console.error("[POS] Print setup error:", setupError)
+              toast.error("Gagal menyiapkan cetak struk", {
+                description: setupError?.message || "Terjadi kesalahan saat menyiapkan printer.",
+              })
+            }
+          } else {
+            console.warn("[POS] Bluetooth API not available (server-side or unsupported browser)")
+            // Don't show error to user if Bluetooth is not available (e.g., on server-side render)
+          }
         }
       }
 
@@ -619,8 +713,381 @@ export default function POSPage() {
     )
   }
 
+  const handleConnectPrinterFromAlert = async () => {
+    setShowPrinterAlert(false)
+    await handleConnectPrinter()
+  }
+
+  const handleViewReceiptDetail = async (receiptId: string) => {
+    if (!supabaseClient) {
+      toast.error("Konfigurasi Supabase belum lengkap")
+      return
+    }
+
+    try {
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession()
+
+      if (!session) {
+        toast.error("Sesi login tidak ditemukan", {
+          description: "Silakan login kembali.",
+        })
+        return
+      }
+
+      // Get receipt detail with order data
+      const res = await fetch(`/api/admin/receipts/${receiptId}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error("Gagal memuat data struk", {
+          description: json.error ?? "Terjadi kesalahan saat memuat data.",
+        })
+        return
+      }
+
+      setReceiptDetailData(json)
+      setSelectedReceiptForDetail(receiptId)
+      setIsReceiptDetailOpen(true)
+    } catch (err: any) {
+      toast.error("Terjadi kesalahan saat memuat detail struk", {
+        description: err?.message,
+      })
+    }
+  }
+
+  const handleCancelReceiptOrder = (orderId: string) => {
+    setCancelOrderId(orderId)
+    setShowCancelConfirm(true)
+  }
+
+  const handleConfirmCancelOrder = async () => {
+    if (!cancelOrderId || !supabaseClient) {
+      toast.error("Konfigurasi Supabase belum lengkap")
+      setShowCancelConfirm(false)
+      return
+    }
+
+    try {
+      setCancellingReceiptId(cancelOrderId)
+
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession()
+
+      if (!session) {
+        toast.error("Sesi login tidak ditemukan", {
+          description: "Silakan login kembali.",
+        })
+        return
+      }
+
+      const res = await fetch(`/api/admin/orders/${cancelOrderId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ status: "cancelled", cancel_note: "Dibatalkan dari POS" }),
+      })
+
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error ?? "Gagal membatalkan pesanan")
+        return
+      }
+
+      // Refresh receipt history
+      const historyRes = await fetch("/api/admin/receipts?limit=10", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+
+      if (historyRes.ok) {
+        const historyJson = await historyRes.json()
+        setReceiptHistory(historyJson.receipts ?? [])
+      }
+
+      toast.success("Pesanan berhasil dibatalkan dan stok produk dikembalikan")
+    } catch (err: any) {
+      toast.error("Terjadi kesalahan saat membatalkan pesanan", {
+        description: err?.message,
+      })
+    } finally {
+      setCancellingReceiptId(null)
+    }
+  }
+
+  const handleReprintReceipt = async (receiptId: string) => {
+    if (!supabaseClient) {
+      toast.error("Konfigurasi Supabase belum lengkap")
+      return
+    }
+
+    // Check printer connection
+    if (!printerConnected) {
+      setSelectedReceiptForDetail(receiptId)
+      setShowPrinterConnectConfirm(true)
+      return
+    }
+
+    try {
+      setReprintingReceiptId(receiptId)
+
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession()
+
+      if (!session) {
+        toast.error("Sesi login tidak ditemukan", {
+          description: "Silakan login kembali.",
+        })
+        return
+      }
+
+      // Get receipt detail with order data
+      const res = await fetch(`/api/admin/receipts/${receiptId}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error("Gagal memuat data struk", {
+          description: json.error ?? "Terjadi kesalahan saat memuat data.",
+        })
+        return
+      }
+
+      const { receipt: receiptDetail, order } = json
+
+      if (!order) {
+        toast.error("Data order tidak ditemukan")
+        return
+      }
+
+      // Load settings
+      const receiptSettings = await loadSettings()
+
+      // Get payment method name
+      let paymentMethodName = "Belum dibayar"
+      if (order.payments && order.payments.length > 0) {
+        const payment = order.payments[0]
+        if (payment.payment_methods) {
+          paymentMethodName = payment.payment_methods.name || "Sudah dibayar"
+        } else {
+          paymentMethodName = "Sudah dibayar"
+        }
+      }
+
+      // Get cashier name from session user
+      const cashierName = session.user.user_metadata?.full_name || session.user.email || "Kasir"
+
+      // Prepare receipt data for printing
+      const receiptData: ReceiptData = {
+        receiptNumber: receiptDetail.receipt_number?.toString() || "N/A",
+        orderDate: new Date(order.created_at),
+        customerName: order.customer_name || undefined,
+        tableNumber: order.table_number || undefined,
+        items: (order.order_items || []).map((item: any) => ({
+          name: item.product_name,
+          quantity: item.quantity,
+          price: Number(item.unit_price),
+          total: Number(item.total),
+        })),
+        subtotal: Number(order.subtotal),
+        tax: Number(order.tax_amount),
+        total: Number(order.total),
+        paymentMethod: paymentMethodName,
+        cashier: cashierName,
+        restaurantName: receiptSettings.restaurant_name,
+        restaurantAddress: receiptSettings.restaurant_address,
+        restaurantPhone: receiptSettings.restaurant_phone,
+        footerMessage: receiptSettings.receipt_footer,
+        taxRate: receiptSettings.tax_rate,
+      }
+
+      // Print receipt - ensure it only runs in browser/client-side
+      if (typeof window !== "undefined" && "bluetooth" in navigator) {
+        const printer = getPrinterInstance()
+        const printed = await printer.printReceipt(receiptData)
+
+        if (!printed) {
+          toast.error("Gagal mencetak struk", {
+            description: "Pastikan printer terhubung dan siap.",
+          })
+        } else {
+          toast.success("Struk berhasil dicetak ulang")
+        }
+      } else {
+        toast.error("Bluetooth tidak tersedia", {
+          description: "Pastikan browser mendukung Bluetooth API.",
+        })
+      }
+    } catch (err: any) {
+      toast.error("Terjadi kesalahan saat mencetak ulang struk", {
+        description: err?.message,
+      })
+    } finally {
+      setReprintingReceiptId(null)
+    }
+  }
+
   return (
     <div className="flex h-screen bg-muted/30">
+      {/* Printer Alert Dialog */}
+      <AlertDialog open={showPrinterAlert} onOpenChange={setShowPrinterAlert}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Printer Belum Terhubung</AlertDialogTitle>
+            <AlertDialogDescription>
+              Auto print struk diaktifkan, tetapi printer belum terhubung. Silakan hubungkan printer terlebih dahulu untuk mencetak struk secara otomatis.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setShowPrinterAlert(false)}>
+              Tutup
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConnectPrinterFromAlert}>
+              Koneksikan Printer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Cancel Order Confirmation Dialog */}
+      <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Batalkan Pesanan</AlertDialogTitle>
+            <AlertDialogDescription>
+              Apakah Anda yakin ingin membatalkan pesanan ini? Stok produk akan dikembalikan ke sistem. Tindakan ini tidak dapat dibatalkan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowCancelConfirm(false)
+              setCancelOrderId(null)
+            }}>
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmCancelOrder}>
+              Ya, Batalkan Pesanan
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Printer Connect Confirmation Dialog */}
+      <AlertDialog open={showPrinterConnectConfirm} onOpenChange={setShowPrinterConnectConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Printer Belum Terhubung</AlertDialogTitle>
+            <AlertDialogDescription>
+              Printer belum terhubung. Hubungkan printer terlebih dahulu untuk mencetak struk?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowPrinterConnectConfirm(false)
+              setSelectedReceiptForDetail(null)
+            }}>
+              Batal
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={async () => {
+              setShowPrinterConnectConfirm(false)
+              await handleConnectPrinter()
+              if (printerConnected && selectedReceiptForDetail) {
+                await handleReprintReceipt(selectedReceiptForDetail)
+              } else {
+                toast.error("Gagal terhubung ke printer", {
+                  description: "Silakan hubungkan printer terlebih dahulu.",
+                })
+              }
+              setSelectedReceiptForDetail(null)
+            }}>
+              Hubungkan Printer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Receipt Detail Dialog */}
+      <Dialog open={isReceiptDetailOpen} onOpenChange={setIsReceiptDetailOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detail Struk</DialogTitle>
+          </DialogHeader>
+          {receiptDetailData && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">No Struk</Label>
+                  <p className="font-medium">{receiptDetailData.receipt?.receipt_number || "N/A"}</p>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Tanggal</Label>
+                  <p className="font-medium">
+                    {new Date(receiptDetailData.order?.created_at).toLocaleString("id-ID")}
+                  </p>
+                </div>
+                {receiptDetailData.order?.customer_name && (
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Nama Customer</Label>
+                    <p className="font-medium">{receiptDetailData.order.customer_name}</p>
+                  </div>
+                )}
+                {receiptDetailData.order?.table_number && (
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Meja</Label>
+                    <p className="font-medium">{receiptDetailData.order.table_number}</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-2 block">Items</Label>
+                <div className="space-y-2">
+                  {receiptDetailData.order?.order_items?.map((item: any, idx: number) => (
+                    <div key={idx} className="flex justify-between items-center border-b pb-2">
+                      <div className="flex-1">
+                        <p className="font-medium">{item.product_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {item.quantity} x {formatCurrency(Number(item.unit_price))}
+                        </p>
+                      </div>
+                      <p className="font-medium">{formatCurrency(Number(item.total))}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1 pt-2 border-t">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="font-medium">{formatCurrency(Number(receiptDetailData.order?.subtotal || 0))}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Pajak</span>
+                  <span className="font-medium">{formatCurrency(Number(receiptDetailData.order?.tax_amount || 0))}</span>
+                </div>
+                <div className="flex justify-between text-lg font-bold pt-2 border-t">
+                  <span>Total</span>
+                  <span>{formatCurrency(Number(receiptDetailData.order?.total || 0))}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Products Section */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-card border-b px-6 py-4 flex items-center justify-between">
@@ -653,6 +1120,89 @@ export default function POSPage() {
                         : "Hubungkan printer"}
                   </span>
                 </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="flex items-center gap-2">
+                      <History className="h-4 w-4" />
+                      <span className="text-xs">History</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-80 max-h-96 overflow-y-auto">
+                    <DropdownMenuLabel>History Transaksi (10 Terakhir)</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {loadingHistory ? (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        Memuat...
+                      </div>
+                    ) : receiptHistory.length === 0 ? (
+                      <div className="p-4 text-center text-sm text-muted-foreground">
+                        Belum ada history transaksi
+                      </div>
+                    ) : (
+                      receiptHistory.map((receipt) => (
+                        <DropdownMenuItem
+                          key={receipt.id}
+                          className="flex items-center justify-between gap-2 p-2 cursor-default"
+                          onSelect={(e) => e.preventDefault()}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium">
+                              No Struk: {receipt.receipt_number || "N/A"}
+                            </div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {new Date(receipt.printed_at).toLocaleString("id-ID", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleViewReceiptDetail(receipt.id)}
+                              className="h-7 w-7 p-0"
+                              title="Detail"
+                            >
+                              <Eye className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleReprintReceipt(receipt.id)}
+                              disabled={reprintingReceiptId === receipt.id}
+                              className="h-7 w-7 p-0"
+                              title="Reprint"
+                            >
+                              {reprintingReceiptId === receipt.id ? (
+                                <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                              ) : (
+                                <RotateCcw className="h-3 w-3" />
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleCancelReceiptOrder(receipt.order_id)}
+                              disabled={cancellingReceiptId === receipt.order_id}
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                              title="Batal"
+                            >
+                              {cancellingReceiptId === receipt.order_id ? (
+                                <div className="h-3 w-3 animate-spin rounded-full border-2 border-destructive border-t-transparent" />
+                              ) : (
+                                <XCircle className="h-3 w-3" />
+                              )}
+                            </Button>
+                          </div>
+                        </DropdownMenuItem>
+                      ))
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <span
                     className={`h-2 w-2 rounded-full ${

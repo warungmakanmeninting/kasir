@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { loadSettings, type AppSettings } from "@/lib/settings"
 import { supabaseClient } from "@/lib/supabaseClient"
+import { getUserRole } from "@/lib/role-guard"
 import { 
   ShoppingCart, 
   ChefHat, 
@@ -19,6 +20,8 @@ import {
 export default function HomePage() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const [loadingRole, setLoadingRole] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
@@ -27,6 +30,21 @@ export default function HomePage() {
       setSettings(appSettings)
     }
     loadAppSettings()
+  }, [])
+
+  useEffect(() => {
+    const loadUserRole = async () => {
+      try {
+        const role = await getUserRole()
+        setUserRole(role)
+      } catch (error) {
+        console.error("Error loading user role:", error)
+        setUserRole(null)
+      } finally {
+        setLoadingRole(false)
+      }
+    }
+    loadUserRole()
   }, [])
 
   const handleLogout = async () => {
@@ -90,8 +108,9 @@ export default function HomePage() {
 
         {/* Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 md:gap-6 max-w-4xl mx-auto">
-          {/* Cashier POS Card */}
-          <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
+          {/* Cashier POS Card - Show for cashier, admin, and manager */}
+          {(userRole === "cashier" || userRole === "admin" || userRole === "manager") && (
+            <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
             <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
                 <ShoppingCart className="h-5 w-5 text-primary" />
@@ -110,9 +129,10 @@ export default function HomePage() {
               </Link>
             </CardContent>
           </Card>
+          )}
 
-          {/* Kitchen Dashboard Card - Only show if bypass_kitchen_menu is false */}
-          {settings?.bypass_kitchen_menu !== true && (
+          {/* Kitchen Dashboard Card - Show for chef, admin, and manager (if bypass_kitchen_menu is false) */}
+          {settings?.bypass_kitchen_menu !== true && (userRole === "chef" || userRole === "admin" || userRole === "manager") && (
             <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
               <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
@@ -129,13 +149,14 @@ export default function HomePage() {
                     Buka Dapur
                     <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-200 group-hover/btn:translate-x-1" />
                   </Button>
-                </Link>
-              </CardContent>
-            </Card>
+              </Link>
+            </CardContent>
+          </Card>
           )}
 
-          {/* Admin Dashboard Card */}
-          <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
+          {/* Admin Dashboard Card - Only show for admin and manager */}
+          {(userRole === "admin" || userRole === "manager") && (
+            <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
             <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
                 <LayoutDashboard className="h-5 w-5 text-primary" />
@@ -154,8 +175,9 @@ export default function HomePage() {
               </Link>
             </CardContent>
           </Card>
+          )}
 
-          {/* User Profile Card */}
+          {/* User Profile Card - Show for all roles */}
           <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
             <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">

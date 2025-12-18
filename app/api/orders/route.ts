@@ -142,6 +142,34 @@ export async function POST(req: NextRequest) {
 
     console.log("[ORDERS API] Order items created successfully:", insertedItems?.length || 0, "items")
 
+    // Check stock availability before proceeding with payment
+    // This ensures we don't create payment if stock is insufficient
+    for (const item of items) {
+      if (item.product_id) {
+        const { data: product, error: productError } = await supabase
+          .from("products")
+          .select("stock_quantity, track_stock")
+          .eq("id", item.product_id)
+          .single()
+
+        if (!productError && product && product.track_stock) {
+          const currentStock = product.stock_quantity || 0
+          const requestedQuantity = Number(item.quantity)
+
+          if (currentStock < requestedQuantity) {
+            console.error(`[ORDERS API] Insufficient stock for product ${item.product_id}. Current: ${currentStock}, Requested: ${requestedQuantity}`)
+            // Rollback order and items
+            await supabase.from("order_items").delete().eq("order_id", order.id)
+            await supabase.from("orders").delete().eq("id", order.id)
+            return NextResponse.json(
+              { error: `Stok tidak mencukupi untuk produk ${item.product_name}. Stok tersedia: ${currentStock}` },
+              { status: 400 }
+            )
+          }
+        }
+      }
+    }
+
     // Create payment record - MUST be created for every order since payment_status is "paid"
     // If amount_paid is not provided, use total as amount_paid (for non-cash payments like QRIS, transfer)
     const paymentAmount = amount_paid !== undefined ? Number(amount_paid) : Number(total)
@@ -168,6 +196,43 @@ export async function POST(req: NextRequest) {
     }
 
     console.log("[ORDERS API] Payment created successfully:", payment?.id)
+
+    // Update product stock after payment is successful
+    // This ensures stock is only reduced when payment is confirmed
+    for (const item of items) {
+      if (item.product_id) {
+        // Get current product stock info
+        const { data: product, error: productError } = await supabase
+          .from("products")
+          .select("stock_quantity, track_stock")
+          .eq("id", item.product_id)
+          .single()
+
+        if (!productError && product && product.track_stock) {
+          const currentStock = product.stock_quantity || 0
+          const newStock = currentStock - Number(item.quantity)
+
+          // Update stock (we already checked availability above)
+          const { error: updateStockError } = await supabase
+            .from("products")
+            .update({
+              stock_quantity: newStock,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", item.product_id)
+
+          if (updateStockError) {
+            console.error(`[ORDERS API] Failed to update stock for product ${item.product_id}:`, updateStockError)
+            // Note: Payment is already created, so we should not rollback
+            // This is a warning but the order is still valid
+            // In production, you might want to implement a compensation transaction or alert
+            console.warn(`[ORDERS API] Stock update failed but order is already paid. Product: ${item.product_id}`)
+          } else {
+            console.log(`[ORDERS API] Stock updated for product ${item.product_id}: ${currentStock} -> ${newStock}`)
+          }
+        }
+      }
+    }
 
     console.log("[ORDERS API] Order creation completed successfully:", order.id)
     return NextResponse.json({ order }, { status: 201 })

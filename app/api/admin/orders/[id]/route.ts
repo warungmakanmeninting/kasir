@@ -41,6 +41,50 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Status tidak valid" }, { status: 400 })
     }
 
+    // If cancelling, restore stock BEFORE updating order status
+    if (status === "cancelled") {
+      // Get the order with items first to restore stock
+      const { data: orderWithItems, error: orderError } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          order_items (*)
+        `)
+        .eq("id", id)
+        .single()
+
+      if (!orderError && orderWithItems && orderWithItems.order_items) {
+        // Restore stock for each item
+        for (const item of orderWithItems.order_items) {
+          if (item.product_id) {
+            // Get current product stock
+            const { data: product, error: productError } = await supabase
+              .from("products")
+              .select("stock_quantity, track_stock")
+              .eq("id", item.product_id)
+              .single()
+
+            if (!productError && product && product.track_stock) {
+              // Restore stock by adding quantity back
+              const { error: updateStockError } = await supabase
+                .from("products")
+                .update({
+                  stock_quantity: (product.stock_quantity || 0) + item.quantity,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", item.product_id)
+
+              if (updateStockError) {
+                console.error(`[ADMIN ORDERS API] Failed to restore stock for product ${item.product_id}:`, updateStockError)
+              } else {
+                console.log(`[ADMIN ORDERS API] Restored stock for product ${item.product_id}: +${item.quantity}`)
+              }
+            }
+          }
+        }
+      }
+    }
+
     const updates: Record<string, any> = {
       status,
       updated_at: new Date().toISOString(),
