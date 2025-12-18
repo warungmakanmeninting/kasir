@@ -144,9 +144,24 @@ export default function OrdersPage() {
         return
       }
 
-      // Delete via API (we'll need to create DELETE endpoint)
-      // For now, just show error
-      toast.error("Fitur hapus pesanan belum tersedia")
+      // Delete order via API
+      const res = await fetch(`/api/admin/orders/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error(json.error ?? "Gagal menghapus pesanan")
+        return
+      }
+
+      // Remove from local state
+      setOrders((prev) => prev.filter((order) => order.id !== id))
+
+      toast.success("Pesanan berhasil dihapus. Stok produk telah dikembalikan.")
     } catch (err: any) {
       toast.error("Terjadi kesalahan saat menghapus pesanan")
       console.error("Error deleting order:", err)
@@ -240,7 +255,7 @@ export default function OrdersPage() {
                       <AlertDialogHeader>
                         <AlertDialogTitle>Hapus Pesanan</AlertDialogTitle>
                         <AlertDialogDescription>
-                          Pesanan ini akan dihapus dari daftar. Tindakan ini tidak dapat dibatalkan.
+                          Pesanan ini akan dihapus secara permanen beserta data pembayaran dan struk terkait. Stok produk akan dikembalikan ke sistem. Tindakan ini tidak dapat dibatalkan.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

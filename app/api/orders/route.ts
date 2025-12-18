@@ -197,6 +197,44 @@ export async function POST(req: NextRequest) {
 
     console.log("[ORDERS API] Payment created successfully:", payment?.id)
 
+    // Create financial transaction (income) from payment
+    // This automatically records the income from sales
+    try {
+      // Get payment method name for notes
+      let paymentMethodName = "Unknown"
+      if (payment_method_id) {
+        const { data: paymentMethod } = await supabase
+          .from("payment_methods")
+          .select("name")
+          .eq("id", payment_method_id)
+          .single()
+        if (paymentMethod) {
+          paymentMethodName = paymentMethod.name
+        }
+      }
+
+      const orderNumber = order.order_number ? `ORD-${order.order_number}` : order.id.slice(-8)
+      const notes = `Pembayaran pesanan ${orderNumber} via ${paymentMethodName}`
+
+      const { error: financeError } = await supabase.from("financial_transactions").insert({
+        transaction_type: "income",
+        amount: Number(total), // Use total order amount as income
+        notes,
+        created_by: user.id,
+      })
+
+      if (financeError) {
+        // Log error but don't fail the order creation
+        console.warn("[ORDERS API] Failed to create financial transaction:", financeError)
+        // Order and payment are already created, so we continue
+      } else {
+        console.log("[ORDERS API] Financial transaction created for order:", order.id)
+      }
+    } catch (financeErr: any) {
+      // Non-fatal error - order is already created
+      console.warn("[ORDERS API] Error creating financial transaction:", financeErr)
+    }
+
     // Update product stock after payment is successful
     // This ensures stock is only reduced when payment is confirmed
     for (const item of items) {

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Package, ShoppingBag, BarChart3, Users, ArrowLeft, Tags, CreditCard, Receipt, Settings } from "lucide-react"
+import { LayoutDashboard, Package, ShoppingBag, BarChart3, Users, ArrowLeft, Tags, CreditCard, Receipt, Settings, Wallet } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getUserRole } from "@/lib/role-guard"
 import { supabaseClient } from "@/lib/supabaseClient"
@@ -14,11 +14,12 @@ import { supabaseClient } from "@/lib/supabaseClient"
 const navItems = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/products", label: "Produk", icon: Package },
-  { href: "/admin/orders", label: "Pesanan", icon: ShoppingBag },
-  { href: "/admin/reports", label: "Laporan", icon: BarChart3 },
   { href: "/admin/categories", label: "Kategori", icon: Tags },
-  { href: "/admin/payment-methods", label: "Metode Pembayaran", icon: CreditCard },
+  { href: "/admin/orders", label: "Pesanan", icon: ShoppingBag },
   { href: "/admin/receipts", label: "Struk", icon: Receipt },
+  { href: "/admin/finance", label: "Keuangan", icon: Wallet },
+  { href: "/admin/reports", label: "Laporan", icon: BarChart3 },
+  { href: "/admin/payment-methods", label: "Metode Pembayaran", icon: CreditCard },
   { href: "/admin/users", label: "Pengguna", icon: Users },
   { href: "/admin/settings", label: "Pengaturan", icon: Settings },
 ]

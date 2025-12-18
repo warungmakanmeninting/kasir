@@ -49,6 +49,7 @@ export class BluetoothPrinter {
   private device: any | null = null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private characteristic: any | null = null
+  private disconnectHandler: (() => void) | null = null
 
   /**
    * Connect to bluetooth printer
@@ -69,6 +70,14 @@ export class BluetoothPrinter {
       // Connect to GATT server
       const server = await this.device.gatt.connect()
 
+      // Set up disconnect listener
+      this.disconnectHandler = () => {
+        console.warn("[Bluetooth Printer] Device disconnected unexpectedly")
+        this.device = null
+        this.characteristic = null
+      }
+      this.device.addEventListener("gattserverdisconnected", this.disconnectHandler)
+
       // Get service
       const service = await server.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb")
 
@@ -83,54 +92,153 @@ export class BluetoothPrinter {
   }
 
   /**
-   * Check if printer is connected
+   * Check if printer is connected (with more robust checking)
    */
   isConnected(): boolean {
-    return this.device !== null && this.device.gatt?.connected === true
+    try {
+      if (!this.device) {
+        return false
+      }
+      
+      // Check if GATT exists and is connected
+      if (!this.device.gatt) {
+        return false
+      }
+      
+      // Some devices may not have the connected property, so we check both
+      const isGattConnected = this.device.gatt.connected === true
+      const hasCharacteristic = this.characteristic !== null
+      
+      return isGattConnected && hasCharacteristic
+    } catch (error) {
+      console.error("[Bluetooth Printer] Error checking connection:", error)
+      return false
+    }
   }
 
   /**
    * Disconnect from printer
    */
   disconnect(): void {
+    // Remove disconnect listener if exists
+    if (this.device && this.disconnectHandler) {
+      this.device.removeEventListener("gattserverdisconnected", this.disconnectHandler)
+      this.disconnectHandler = null
+    }
+
     if (this.device && this.device.gatt?.connected) {
-      this.device.gatt.disconnect()
+      try {
+        this.device.gatt.disconnect()
+      } catch (error) {
+        console.warn("[Bluetooth Printer] Error during disconnect:", error)
+      }
     }
     this.device = null
     this.characteristic = null
   }
 
   /**
-   * Send data to printer
+   * Send data to printer with retry mechanism
    */
-  private async write(data: string): Promise<void> {
+  private async write(data: string, retries = 3): Promise<void> {
     if (!this.characteristic) {
       throw new Error("Printer not connected")
+    }
+
+    // Check connection before writing
+    if (!this.isConnected()) {
+      throw new Error("Printer connection lost")
     }
 
     const encoder = new TextEncoder()
     const bytes = encoder.encode(data)
 
-    // Split into chunks if needed (max 20 bytes per write for some printers)
-    const chunkSize = 20
+    // Split into smaller chunks for better reliability (reduced from 20 to 10 bytes)
+    const chunkSize = 10
     for (let i = 0; i < bytes.length; i += chunkSize) {
       const chunk = bytes.slice(i, i + chunkSize)
-      await this.characteristic.writeValue(chunk)
-      await new Promise((resolve) => setTimeout(resolve, 10)) // Small delay between writes
+      
+      // Retry mechanism for each chunk
+      let lastError: Error | null = null
+      for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+          // Check connection before each write
+          if (!this.isConnected()) {
+            throw new Error("Printer connection lost during write")
+          }
+
+          await this.characteristic.writeValue(chunk)
+          
+          // Increased delay between writes for better stability (20ms instead of 10ms)
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          
+          lastError = null
+          break // Success, exit retry loop
+        } catch (error: any) {
+          lastError = error
+          console.warn(`[Bluetooth Printer] Write attempt ${attempt + 1} failed:`, error)
+          
+          // Exponential backoff: wait longer before retry
+          if (attempt < retries - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
+            
+            // Try to reconnect if connection lost
+            if (error.message?.includes("connection") || error.message?.includes("disconnect") || error.message?.includes("GATT")) {
+              console.log("[Bluetooth Printer] Connection lost, attempting to reconnect...")
+              const reconnected = await this.reconnect()
+              if (!reconnected) {
+                throw new Error("Failed to reconnect to printer")
+              }
+              console.log("[Bluetooth Printer] Reconnected successfully")
+            }
+          }
+        }
+      }
+
+      // If all retries failed, throw error
+      if (lastError) {
+        throw lastError
+      }
+    }
+
+    // Final flush delay to ensure data is sent
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  /**
+   * Reconnect to printer if connection is lost
+   */
+  private async reconnect(): Promise<boolean> {
+    try {
+      // Try to reconnect using existing device
+      if (this.device && this.device.gatt) {
+        const server = await this.device.gatt.connect()
+        const service = await server.getPrimaryService("000018f0-0000-1000-8000-00805f9b34fb")
+        this.characteristic = await service.getCharacteristic("00002af1-0000-1000-8000-00805f9b34fb")
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error("[Bluetooth Printer] Reconnection failed:", error)
+      return false
     }
   }
 
   /**
-   * Print receipt
+   * Print receipt with improved error handling and connection stability
    */
   async printReceipt(data: ReceiptData): Promise<boolean> {
     try {
+      // Verify connection before starting
       if (!this.isConnected()) {
         throw new Error("Printer not connected")
       }
 
-      // Initialize
+      // Initialize printer with retry
       await this.write(Commands.INIT)
+      
+      // Small delay after initialization
+      await new Promise((resolve) => setTimeout(resolve, 100))
 
       // Header
       await this.write(Commands.ALIGN_CENTER)
@@ -211,12 +319,30 @@ export class BluetoothPrinter {
 
       await this.write("\n\n")
 
+      // Final delay before cut to ensure all data is printed
+      await new Promise((resolve) => setTimeout(resolve, 200))
+
       // Cut paper
       await this.write(Commands.CUT_PAPER)
 
+      // Final flush delay to ensure cut command is executed
+      await new Promise((resolve) => setTimeout(resolve, 300))
+
+      // Verify connection is still active after printing
+      if (!this.isConnected()) {
+        console.warn("[Bluetooth Printer] Connection lost after printing, but receipt may have been printed")
+      }
+
       return true
-    } catch (error) {
-      console.error("Failed to print receipt:", error)
+    } catch (error: any) {
+      console.error("[Bluetooth Printer] Failed to print receipt:", error)
+      
+      // If connection error, try to reconnect for next time
+      if (error.message?.includes("connection") || error.message?.includes("disconnect")) {
+        console.log("[Bluetooth Printer] Attempting to reconnect...")
+        await this.reconnect()
+      }
+      
       return false
     }
   }
