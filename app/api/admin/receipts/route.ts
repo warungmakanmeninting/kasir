@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getAdminClient, requireAdmin } from "../users/route"
+import { getAdminClient, requireAdmin } from "@/lib/admin-client"
 
 export async function GET(req: NextRequest) {
   try {
@@ -59,10 +59,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "copy_type tidak valid." }, { status: 400 })
     }
 
+    const finalCopyType = copy_type ?? "original"
+
+    // Check if order already has an original receipt (only for original receipts)
+    if (finalCopyType === "original") {
+      const { data: existingReceipt, error: checkError } = await supabase
+        .from("receipts")
+        .select("id, receipt_number, print_status")
+        .eq("order_id", order_id)
+        .eq("copy_type", "original")
+        .maybeSingle()
+
+      if (checkError) {
+        console.error("[ADMIN RECEIPTS API] Error checking existing receipt:", checkError)
+        return NextResponse.json({ error: "Gagal memeriksa receipt yang sudah ada" }, { status: 500 })
+      }
+
+      if (existingReceipt) {
+        console.log("[ADMIN RECEIPTS API] Order already has original receipt:", existingReceipt.id)
+        // Return existing receipt instead of creating new one
+        return NextResponse.json(
+          {
+            receipt: existingReceipt,
+            message: "Receipt sudah ada untuk order ini",
+          },
+          { status: 200 }
+        )
+      }
+    }
+
     const payload = {
       order_id,
-      copy_type: copy_type ?? "original",
+      copy_type: finalCopyType,
       printed_by: user.id,
+      print_status: "pending",
       data_snapshot: {
         note: note ?? null,
         created_via: "admin_panel",
@@ -73,7 +103,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await supabase
       .from("receipts")
       .insert(payload)
-      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type")
+      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
       .single()
 
     if (error) {

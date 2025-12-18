@@ -17,6 +17,18 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { supabaseClient } from "@/lib/supabaseClient"
 import { Switch } from "@/components/ui/switch"
 import { Search, CreditCard, Pencil, Trash2, ArrowUpDown } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 
 type PaymentMethodRow = {
   id: string
@@ -37,6 +49,7 @@ export default function PaymentMethodsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingMethod, setEditingMethod] = useState<PaymentMethodRow | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [deletingMethodId, setDeletingMethodId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     code: "",
     name: "",
@@ -224,7 +237,18 @@ export default function PaymentMethodsPage() {
       return
     }
 
-    if (!confirm(`Hapus metode pembayaran "${method.name}" (${method.code})?`)) {
+    setDeletingMethodId(method.id)
+  }
+
+  const confirmDeleteMethod = async () => {
+    if (!deletingMethodId || !supabaseClient) {
+      setDeletingMethodId(null)
+      return
+    }
+
+    const method = methods.find((m) => m.id === deletingMethodId)
+    if (!method) {
+      setDeletingMethodId(null)
       return
     }
 
@@ -345,15 +369,33 @@ export default function PaymentMethodsPage() {
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    title="Hapus metode"
-                    onClick={() => handleDeleteMethod(m)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
+                  <AlertDialog open={deletingMethodId === m.id} onOpenChange={(open) => !open && setDeletingMethodId(null)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Hapus metode"
+                        onClick={() => handleDeleteMethod(m)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Hapus Metode Pembayaran</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Apakah Anda yakin ingin menghapus metode pembayaran "{m.name}" ({m.code})? Tindakan ini tidak dapat dibatalkan.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setDeletingMethodId(null)}>Batal</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteMethod} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Hapus
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </TableCell>
             </TableRow>

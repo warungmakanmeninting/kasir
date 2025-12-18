@@ -20,6 +20,28 @@ import { loadSettings } from "@/lib/settings"
 import { formatCurrency } from "@/lib/currency"
 import { toast } from "sonner"
 import { Search, Receipt as ReceiptIcon, Trash2, Printer } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 type ReceiptRow = {
   id: string
@@ -40,6 +62,11 @@ export default function ReceiptsPage() {
   const [printerConnected, setPrinterConnected] = useState(false)
   const [connectingPrinter, setConnectingPrinter] = useState(false)
   const [reprintingReceiptId, setReprintingReceiptId] = useState<string | null>(null)
+  const [deletingReceiptId, setDeletingReceiptId] = useState<string | null>(null)
+  const [showPrinterConnectConfirm, setShowPrinterConnectConfirm] = useState(false)
+  const [pendingReprintReceipt, setPendingReprintReceipt] = useState<ReceiptRow | null>(null)
+  const [deletingReceiptId, setDeletingReceiptId] = useState<string | null>(null)
+  const [showPrinterConnectConfirm, setShowPrinterConnectConfirm] = useState(false)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -142,11 +169,13 @@ export default function ReceiptsPage() {
     }
 
     if (!isPrinterReady) {
-      const connect = confirm("Printer belum terhubung. Hubungkan printer terlebih dahulu?")
-      if (connect) {
-        await handleConnectPrinter()
-        // Re-check connection after attempting to connect
-        try {
+      setPendingReprintReceipt(receipt)
+      setShowPrinterConnectConfirm(true)
+      return
+    }
+
+    // If printer is ready, proceed with reprint
+    try {
           const printer = getPrinterInstance()
           isPrinterReady = printer.isConnected()
           setPrinterConnected(isPrinterReady)
@@ -274,27 +303,8 @@ export default function ReceiptsPage() {
         setReceipts((prev) =>
           prev.map((r) => (r.id === receipt.id ? { ...r, print_status: "printed" as const } : r))
         )
-        // Create new receipt entry for reprint
-        const receiptRes = await fetch("/api/admin/receipts", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({
-            order_id: order.id,
-            copy_type: "reprint",
-            snapshot: {
-              reprinted_from: receiptDetail.id,
-              reprinted_at: new Date().toISOString(),
-            },
-          }),
-        })
-
-        if (receiptRes.ok) {
-          const { receipt: newReceipt } = await receiptRes.json()
-          setReceipts((prev) => [newReceipt, ...prev])
-        }
+        // Reload receipts to ensure data is fresh
+        loadReceipts()
       }
     } catch (err: any) {
       toast.error("Terjadi kesalahan saat mencetak ulang struk", {
@@ -375,18 +385,23 @@ export default function ReceiptsPage() {
     }
   }
 
-  const handleDeleteReceipt = async (receipt: ReceiptRow) => {
-    if (!supabaseClient) {
-      setError("Konfigurasi Supabase belum lengkap. Hubungi administrator.")
-      return
-    }
-
+  const handleDeleteReceipt = (receipt: ReceiptRow) => {
     if (!receipt.id) {
       setError("ID struk tidak valid.")
       return
     }
+    setDeletingReceiptId(receipt.id)
+  }
 
-    if (!confirm(`Hapus struk #${receipt.receipt_number ?? "?"} untuk order ${receipt.order_id}?`)) {
+  const confirmDeleteReceipt = async () => {
+    if (!deletingReceiptId || !supabaseClient) {
+      setDeletingReceiptId(null)
+      return
+    }
+
+    const receipt = receipts.find((r) => r.id === deletingReceiptId)
+    if (!receipt) {
+      setDeletingReceiptId(null)
       return
     }
 
@@ -397,6 +412,7 @@ export default function ReceiptsPage() {
 
       if (!session) {
         setError("Sesi login tidak ditemukan. Silakan login kembali.")
+        setDeletingReceiptId(null)
         return
       }
 
@@ -410,12 +426,26 @@ export default function ReceiptsPage() {
       const json = await res.json()
       if (!res.ok) {
         setError(json.error ?? "Gagal menghapus struk.")
+        setDeletingReceiptId(null)
         return
       }
 
       setReceipts((prev) => prev.filter((r) => r.id !== receipt.id))
+      toast.success("Struk berhasil dihapus")
+      setDeletingReceiptId(null)
     } catch (err) {
       setError("Terjadi kesalahan saat menghapus struk.")
+      setDeletingReceiptId(null)
+    }
+  }
+
+  const handleConnectPrinterFromConfirm = async () => {
+    setShowPrinterConnectConfirm(false)
+    await handleConnectPrinter()
+    // After connecting, try reprint again if needed
+    if (pendingReprintReceipt) {
+      await handleReprint(pendingReprintReceipt)
+      setPendingReprintReceipt(null)
     }
   }
 
@@ -559,15 +589,34 @@ export default function ReceiptsPage() {
                   >
                     <Printer className="h-3 w-3" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    title="Hapus struk"
-                    onClick={() => handleDeleteReceipt(r)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
+                  <AlertDialog open={deletingReceiptId === r.id} onOpenChange={(open) => !open && setDeletingReceiptId(null)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Hapus struk"
+                        onClick={() => handleDeleteReceipt(r)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Hapus Struk</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Apakah Anda yakin ingin menghapus struk #{r.receipt_number ?? "?"} untuk order {r.order_id}?
+                          Tindakan ini tidak dapat dibatalkan.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setDeletingReceiptId(null)}>Batal</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteReceipt} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Hapus
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </TableCell>
             </TableRow>
@@ -639,6 +688,22 @@ export default function ReceiptsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Printer Connection Confirmation Dialog */}
+      <AlertDialog open={showPrinterConnectConfirm} onOpenChange={setShowPrinterConnectConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Printer Belum Terhubung</AlertDialogTitle>
+            <AlertDialogDescription>
+              Printer belum terhubung. Hubungkan printer terlebih dahulu sebelum mencetak struk?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingReprintReceipt(null)}>Batal</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConnectPrinterFromConfirm}>Hubungkan Printer</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

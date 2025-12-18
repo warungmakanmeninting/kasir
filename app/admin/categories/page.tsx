@@ -17,6 +17,18 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { supabaseClient } from "@/lib/supabaseClient"
 import { Switch } from "@/components/ui/switch"
 import { Search, Tags, Pencil, Trash2, ArrowUpDown } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 
 type CategoryRow = {
   id: string
@@ -36,6 +48,7 @@ export default function CategoriesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     sort_order: "",
@@ -216,11 +229,18 @@ export default function CategoriesPage() {
       return
     }
 
-    if (
-      !confirm(
-        `Hapus kategori "${category.name}"?\n\nPerhatian: Jika masih ada produk yang menggunakan kategori ini, penghapusan bisa gagal.`,
-      )
-    ) {
+    setDeletingCategoryId(category.id)
+  }
+
+  const confirmDeleteCategory = async () => {
+    if (!deletingCategoryId || !supabaseClient) {
+      setDeletingCategoryId(null)
+      return
+    }
+
+    const category = categories.find((c) => c.id === deletingCategoryId)
+    if (!category) {
+      setDeletingCategoryId(null)
       return
     }
 
@@ -341,15 +361,36 @@ export default function CategoriesPage() {
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    title="Hapus kategori"
-                    onClick={() => handleDeleteCategory(cat)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
+                  <AlertDialog open={deletingCategoryId === cat.id} onOpenChange={(open) => !open && setDeletingCategoryId(null)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Hapus kategori"
+                        onClick={() => handleDeleteCategory(cat)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Hapus Kategori</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Apakah Anda yakin ingin menghapus kategori "{cat.name}"?
+                          <br />
+                          <br />
+                          <strong>Perhatian:</strong> Jika masih ada produk yang menggunakan kategori ini, penghapusan bisa gagal.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setDeletingCategoryId(null)}>Batal</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteCategory} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Hapus
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </TableCell>
             </TableRow>

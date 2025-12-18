@@ -102,11 +102,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "order_id wajib diisi" }, { status: 400 })
     }
 
+    const finalCopyType = copy_type || "original"
+
+    // Check if order already has an original receipt (only for original receipts)
+    if (finalCopyType === "original") {
+      const { data: existingReceipt, error: checkError } = await supabase
+        .from("receipts")
+        .select("id, receipt_number, print_status")
+        .eq("order_id", order_id)
+        .eq("copy_type", "original")
+        .maybeSingle()
+
+      if (checkError) {
+        console.error("[RECEIPTS API] Error checking existing receipt:", checkError)
+        return NextResponse.json({ error: "Gagal memeriksa receipt yang sudah ada" }, { status: 500 })
+      }
+
+      if (existingReceipt) {
+        console.log("[RECEIPTS API] Order already has original receipt:", existingReceipt.id)
+        // Return existing receipt instead of creating new one
+        return NextResponse.json(
+          {
+            receipt: existingReceipt,
+            message: "Receipt sudah ada untuk order ini",
+          },
+          { status: 200 }
+        )
+      }
+    }
+
     // Create receipt
     // Kolom receipt_number bertipe bigserial dan akan diisi otomatis oleh database
     const receiptData = {
       order_id,
-      copy_type: copy_type || "original",
+      copy_type: finalCopyType,
       printed_by: user.id,
       cashier_id: user.id,
       printed_at: new Date().toISOString(),
@@ -114,7 +143,7 @@ export async function POST(req: NextRequest) {
       data_snapshot: snapshot ?? {},
     }
 
-    console.log("[RECEIPTS API] Creating receipt for order:", order_id)
+    console.log("[RECEIPTS API] Creating receipt for order:", order_id, "copy_type:", finalCopyType)
 
     const { data: receipt, error: receiptError } = await supabase
       .from("receipts")

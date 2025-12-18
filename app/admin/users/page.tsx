@@ -17,6 +17,18 @@ import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { supabaseClient } from "@/lib/supabaseClient"
 import { Plus, Shield, User2, Search, Pencil, Trash2, Key } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 import { Switch } from "@/components/ui/switch"
 
 type AdminUser = {
@@ -39,6 +51,8 @@ export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
+  const [resettingPasswordUserId, setResettingPasswordUserId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     full_name: "",
     email: "",
@@ -228,7 +242,18 @@ export default function UsersPage() {
       return
     }
 
-    if (!confirm(`Hapus user "${user.full_name}"? Tindakan ini tidak dapat dibatalkan.`)) {
+    setDeletingUserId(user.id)
+  }
+
+  const confirmDeleteUser = async () => {
+    if (!deletingUserId || !supabaseClient) {
+      setDeletingUserId(null)
+      return
+    }
+
+    const user = users.find((u) => u.id === deletingUserId)
+    if (!user) {
+      setDeletingUserId(null)
       return
     }
 
@@ -256,12 +281,15 @@ export default function UsersPage() {
       }
 
       setUsers((prev) => prev.filter((u) => u.id !== user.id))
+      toast.success("User berhasil dihapus")
+      setDeletingUserId(null)
     } catch (err) {
       setError("Terjadi kesalahan saat menghapus user.")
+      setDeletingUserId(null)
     }
   }
 
-  const handleResetPassword = async (user: AdminUser) => {
+  const handleResetPassword = (user: AdminUser) => {
     if (!supabaseClient) {
       setError("Konfigurasi Supabase belum lengkap. Hubungi administrator.")
       return
@@ -272,11 +300,18 @@ export default function UsersPage() {
       return
     }
 
-    if (
-      !confirm(
-        `Reset password untuk user "${user.full_name}" ke password default "Sukses2025"? User akan diminta mengganti password sendiri setelah login.`,
-      )
-    ) {
+    setResettingPasswordUserId(user.id)
+  }
+
+  const confirmResetPassword = async () => {
+    if (!resettingPasswordUserId || !supabaseClient) {
+      setResettingPasswordUserId(null)
+      return
+    }
+
+    const user = users.find((u) => u.id === resettingPasswordUserId)
+    if (!user) {
+      setResettingPasswordUserId(null)
       return
     }
 
@@ -305,10 +340,11 @@ export default function UsersPage() {
         return
       }
 
-      // eslint-disable-next-line no-alert
-      alert(`Password user "${user.full_name}" telah direset ke "Sukses2025".`)
+      toast.success(`Password user "${user.full_name}" telah direset ke "Sukses2025"`)
+      setResettingPasswordUserId(null)
     } catch (err) {
       setError("Terjadi kesalahan saat mereset password user.")
+      setResettingPasswordUserId(null)
     }
   }
 
@@ -412,24 +448,58 @@ export default function UsersPage() {
                     >
                       <Pencil className="h-3 w-3" />
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      title='Reset password ke "Sukses2025"'
-                      onClick={() => handleResetPassword(user)}
-                    >
-                      <Key className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                      title="Hapus user"
-                      onClick={() => handleDeleteUser(user)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <AlertDialog open={resettingPasswordUserId === user.id} onOpenChange={(open) => !open && setResettingPasswordUserId(null)}>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8"
+                          title='Reset password ke "Sukses2025"'
+                          onClick={() => handleResetPassword(user)}
+                        >
+                          <Key className="h-3 w-3" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Reset Password</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Reset password untuk user "{user.full_name}" ke password default "Sukses2025"? User akan diminta mengganti password sendiri setelah login.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel onClick={() => setResettingPasswordUserId(null)}>Batal</AlertDialogCancel>
+                          <AlertDialogAction onClick={confirmResetPassword}>Reset Password</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    <AlertDialog open={deletingUserId === user.id} onOpenChange={(open) => !open && setDeletingUserId(null)}>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          title="Hapus user"
+                          onClick={() => handleDeleteUser(user)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Hapus User</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Apakah Anda yakin ingin menghapus user "{user.full_name}"? Tindakan ini tidak dapat dibatalkan.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel onClick={() => setDeletingUserId(null)}>Batal</AlertDialogCancel>
+                          <AlertDialogAction onClick={confirmDeleteUser} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Hapus
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 )}
               </TableCell>

@@ -16,6 +16,18 @@ import {
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { supabaseClient } from "@/lib/supabaseClient"
 import { Settings as SettingsIcon, Pencil, Trash2, Plus, Search } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { toast } from "sonner"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { clearSettingsCache } from "@/lib/settings"
 
@@ -220,7 +232,18 @@ export default function SettingsPage() {
       return
     }
 
-    if (!confirm(`Hapus pengaturan "${setting.key}"?`)) {
+    setDeletingSettingId(setting.id)
+  }
+
+  const confirmDeleteSetting = async () => {
+    if (!deletingSettingId || !supabaseClient) {
+      setDeletingSettingId(null)
+      return
+    }
+
+    const setting = settings.find((s) => s.id === deletingSettingId)
+    if (!setting) {
+      setDeletingSettingId(null)
       return
     }
 
@@ -337,15 +360,33 @@ export default function SettingsPage() {
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                    title="Hapus pengaturan"
-                    onClick={() => handleDeleteSetting(setting)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
+                  <AlertDialog open={deletingSettingId === setting.id} onOpenChange={(open) => !open && setDeletingSettingId(null)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Hapus pengaturan"
+                        onClick={() => handleDeleteSetting(setting)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Hapus Pengaturan</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Apakah Anda yakin ingin menghapus pengaturan "{setting.key}"? Tindakan ini tidak dapat dibatalkan.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setDeletingSettingId(null)}>Batal</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDeleteSetting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Hapus
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                 </div>
               </TableCell>
             </TableRow>

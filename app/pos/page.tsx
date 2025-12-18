@@ -614,7 +614,11 @@ export default function POSPage() {
       } else {
         const receiptData = await receiptRes.json()
         const receiptId = receiptData.receipt?.id
-        console.log("[POS] Receipt saved successfully:", receiptId)
+        if (receiptData.message) {
+          console.log("[POS] Receipt already exists:", receiptId)
+        } else {
+          console.log("[POS] Receipt saved successfully:", receiptId)
+        }
 
         // Print receipt if printer connected and auto-print enabled
         const shouldAutoPrint = settings?.auto_print_receipt ?? true
