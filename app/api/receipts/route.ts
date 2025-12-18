@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     // Build query
     let query = supabase
       .from("receipts")
-      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type")
+      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
       .order("printed_at", { ascending: false })
       .limit(Number.isFinite(limit) && limit > 0 ? limit : 10)
 
@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
       printed_by: user.id,
       cashier_id: user.id,
       printed_at: new Date().toISOString(),
+      print_status: "pending", // Default: belum print
       data_snapshot: snapshot ?? {},
     }
 

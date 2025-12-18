@@ -6,7 +6,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { LayoutDashboard, Package, ShoppingBag, BarChart3, Users, ArrowLeft, Tags, CreditCard, Receipt, Settings, Wallet } from "lucide-react"
+import { LayoutDashboard, Package, ShoppingBag, BarChart3, Users, ArrowLeft, Tags, CreditCard, Receipt, Settings, Wallet, ChevronLeft, ChevronRight, Menu } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getUserRole } from "@/lib/role-guard"
 import { supabaseClient } from "@/lib/supabaseClient"
@@ -28,6 +28,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
   const router = useRouter()
   const [isAuthorized, setIsAuthorized] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  // Load sidebar state from localStorage
+  useEffect(() => {
+    const savedState = localStorage.getItem("admin-sidebar-open")
+    if (savedState !== null) {
+      setSidebarOpen(savedState === "true")
+    }
+  }, [])
+
+  // Save sidebar state to localStorage
+  useEffect(() => {
+    localStorage.setItem("admin-sidebar-open", sidebarOpen.toString())
+  }, [sidebarOpen])
 
   // Check role authorization
   useEffect(() => {
@@ -76,54 +90,79 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex h-screen bg-muted/30 overflow-hidden">
+    <div className="flex h-screen bg-muted/30 overflow-hidden relative">
       {/* Sidebar */}
-      <aside className="w-64 bg-sidebar border-r border-sidebar-border flex flex-col overflow-hidden shadow-sm">
-        {/* Header */}
-        <div className="p-5 border-b border-sidebar-border flex-shrink-0 bg-gradient-to-r from-sidebar to-sidebar/95">
-          <h1 className="text-xl font-bold text-sidebar-foreground tracking-tight">Panel Admin</h1>
-          <p className="text-xs text-sidebar-foreground/70 mt-0.5">Panel Manajemen</p>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
-          <div className="space-y-1.5">
-            {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = pathname === item.href
-              return (
-                <Link key={item.href} href={item.href} className="block">
-                  <Button
-                    variant="ghost"
-                    className={cn(
-                      "w-full justify-start gap-3 rounded-lg transition-all duration-200 h-10 px-3",
-                      "text-sm font-medium",
-                      isActive
-                        ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
-                        : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-sm",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{item.label}</span>
-                  </Button>
-                </Link>
-              )
-            })}
+      <aside
+        className={cn(
+          "bg-sidebar border-r border-sidebar-border flex flex-col overflow-visible shadow-sm transition-all duration-300 ease-in-out relative",
+          sidebarOpen ? "w-64" : "w-0"
+        )}
+      >
+        <div className={cn("flex flex-col h-full w-64 overflow-hidden", !sidebarOpen && "opacity-0 pointer-events-none")}>
+          {/* Header */}
+          <div className="p-5 border-b border-sidebar-border flex-shrink-0 bg-gradient-to-r from-sidebar to-sidebar/95">
+            <h1 className="text-xl font-bold text-sidebar-foreground tracking-tight">Panel Admin</h1>
+            <p className="text-xs text-sidebar-foreground/70 mt-0.5">Panel Manajemen</p>
           </div>
-        </nav>
 
-        {/* Footer */}
-        <div className="p-3 border-t border-sidebar-border flex-shrink-0 bg-sidebar/50">
-          <Link href="/" className="block">
-            <Button
-              variant="ghost"
-              className="w-full justify-start gap-3 rounded-lg transition-all duration-200 h-10 px-3 text-sm font-medium text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-sm"
-            >
-              <ArrowLeft className="h-4 w-4 shrink-0" />
-              <span className="truncate">Kembali ke Beranda</span>
-            </Button>
-          </Link>
+          {/* Navigation */}
+          <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
+            <div className="space-y-1.5">
+              {navItems.map((item) => {
+                const Icon = item.icon
+                const isActive = pathname === item.href
+                return (
+                  <Link key={item.href} href={item.href} className="block">
+                    <Button
+                      variant="ghost"
+                      className={cn(
+                        "w-full justify-start gap-3 rounded-lg transition-all duration-200 h-10 px-3",
+                        "text-sm font-medium",
+                        isActive
+                          ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
+                          : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-sm",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Button>
+                  </Link>
+                )
+              })}
+            </div>
+          </nav>
+
+          {/* Footer */}
+          <div className="p-3 border-t border-sidebar-border flex-shrink-0 bg-sidebar/50">
+            <Link href="/" className="block">
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 rounded-lg transition-all duration-200 h-10 px-3 text-sm font-medium text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-sm"
+              >
+                <ArrowLeft className="h-4 w-4 shrink-0" />
+                <span className="truncate">Kembali ke Beranda</span>
+              </Button>
+            </Link>
+          </div>
         </div>
+
+        {/* Toggle Button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "absolute top-4 z-20 h-8 w-8 rounded-r-md rounded-l-none bg-sidebar border-r border-t border-b border-sidebar-border hover:bg-sidebar-accent transition-all duration-300 shadow-sm",
+            sidebarOpen ? "-right-8" : "-right-8"
+          )}
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          title={sidebarOpen ? "Sembunyikan sidebar" : "Tampilkan sidebar"}
+        >
+          {sidebarOpen ? (
+            <ChevronLeft className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+        </Button>
       </aside>
 
       {/* Main Content */}

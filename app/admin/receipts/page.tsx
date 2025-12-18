@@ -28,6 +28,7 @@ type ReceiptRow = {
   printed_at: string
   printed_by: string | null
   copy_type: string
+  print_status?: "pending" | "printed" | "failed"
 }
 
 export default function ReceiptsPage() {
@@ -245,12 +246,34 @@ export default function ReceiptsPage() {
       const printer = getPrinterInstance()
       const printed = await printer.printReceipt(receiptData)
 
+      // Update print status
+      try {
+        await fetch(`/api/admin/receipts/${receipt.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ print_status: printed ? "printed" : "failed" }),
+        })
+      } catch (err) {
+        console.error("[RECEIPTS] Failed to update print status:", err)
+      }
+
       if (!printed) {
         toast.error("Gagal mencetak struk", {
           description: "Pastikan printer terhubung dan siap.",
         })
+        // Update receipt status in local state
+        setReceipts((prev) =>
+          prev.map((r) => (r.id === receipt.id ? { ...r, print_status: "failed" as const } : r))
+        )
       } else {
         toast.success("Struk berhasil dicetak ulang")
+        // Update receipt status in local state
+        setReceipts((prev) =>
+          prev.map((r) => (r.id === receipt.id ? { ...r, print_status: "printed" as const } : r))
+        )
         // Create new receipt entry for reprint
         const receiptRes = await fetch("/api/admin/receipts", {
           method: "POST",
@@ -485,6 +508,7 @@ export default function ReceiptsPage() {
             <TableHead>No Struk</TableHead>
             <TableHead>ID Order</TableHead>
             <TableHead>Tipe</TableHead>
+            <TableHead>Status Print</TableHead>
             <TableHead>Tanggal Cetak</TableHead>
             <TableHead className="text-right">Aksi</TableHead>
           </TableRow>
@@ -499,6 +523,25 @@ export default function ReceiptsPage() {
               <TableCell>
                 <Badge variant={r.copy_type === "original" ? "default" : "secondary"}>
                   {r.copy_type === "original" ? "Original" : "Reprint"}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                <Badge
+                  variant={
+                    r.print_status === "printed"
+                      ? "default"
+                      : r.print_status === "failed"
+                        ? "destructive"
+                        : "secondary"
+                  }
+                >
+                  {r.print_status === "printed"
+                    ? "Sudah Print"
+                    : r.print_status === "failed"
+                      ? "Gagal Print"
+                      : r.print_status === "pending"
+                        ? "Belum Print"
+                        : "Tidak diketahui"}
                 </Badge>
               </TableCell>
               <TableCell className="text-xs text-muted-foreground">
@@ -531,7 +574,7 @@ export default function ReceiptsPage() {
           ))}
           {filteredReceipts.length === 0 && !loading && !error && (
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+              <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                 Belum ada struk yang cocok dengan filter.
               </TableCell>
             </TableRow>

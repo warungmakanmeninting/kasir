@@ -68,21 +68,33 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 
     const supabase = getAdminClient()
     const body = await req.json()
-    const { copy_type } = body as { copy_type?: string }
+    const { copy_type, print_status } = body as { copy_type?: string; print_status?: "pending" | "printed" | "failed" }
 
-    if (!copy_type) {
-      return NextResponse.json({ error: "copy_type wajib diisi untuk update." }, { status: 400 })
+    const updates: Record<string, any> = {}
+
+    if (copy_type) {
+      if (!["original", "reprint"].includes(copy_type)) {
+        return NextResponse.json({ error: "copy_type tidak valid." }, { status: 400 })
+      }
+      updates.copy_type = copy_type
     }
 
-    if (!["original", "reprint"].includes(copy_type)) {
-      return NextResponse.json({ error: "copy_type tidak valid." }, { status: 400 })
+    if (print_status) {
+      if (!["pending", "printed", "failed"].includes(print_status)) {
+        return NextResponse.json({ error: "print_status tidak valid." }, { status: 400 })
+      }
+      updates.print_status = print_status
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "copy_type atau print_status wajib diisi untuk update." }, { status: 400 })
     }
 
     const { data, error } = await supabase
       .from("receipts")
-      .update({ copy_type })
+      .update(updates)
       .eq("id", id)
-      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type")
+      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
       .single()
 
     if (error) {

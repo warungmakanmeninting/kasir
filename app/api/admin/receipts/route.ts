@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await supabase
       .from("receipts")
-      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type")
+      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
       .order("printed_at", { ascending: false })
       .limit(Number.isFinite(limit) && limit > 0 ? limit : 100)
 
