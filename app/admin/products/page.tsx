@@ -18,13 +18,24 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Pencil, Trash2, Search } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, X, Eye } from "lucide-react"
 import Image from "next/image"
 import { Switch } from "@/components/ui/switch"
 import { supabaseClient } from "@/lib/supabaseClient"
-import { formatCurrency } from "@/lib/currency"
+import { formatCurrency, formatNumber } from "@/lib/currency"
 import Cropper, { type Area } from "react-easy-crop"
 import { getCroppedFile } from "./crop-utils"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 type CategoryRow = {
   id: string
@@ -56,6 +67,13 @@ type ProductView = {
   trackStock: boolean
 }
 
+type ProductVariant = {
+  id?: string
+  name: string
+  additional_price: number
+  is_active: boolean
+}
+
 export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -84,6 +102,8 @@ export default function ProductsPage() {
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
+  const [variants, setVariants] = useState<ProductVariant[]>([])
+  const [detailVariants, setDetailVariants] = useState<ProductVariant[]>([])
 
   const onCropComplete = (_: Area, croppedPixels: Area) => {
     setCroppedAreaPixels(croppedPixels)
@@ -191,12 +211,42 @@ export default function ProductsPage() {
       p.categoryName.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  const openDetailDialog = (product: ProductView) => {
+  const openDetailDialog = async (product: ProductView) => {
     setDetailProduct(product)
     setIsDetailOpen(true)
+    
+    // Load variants for detail view
+    if (supabaseClient) {
+      try {
+        const { data, error } = await supabaseClient
+          .from("product_variants")
+          .select("id, name, additional_price, is_active")
+          .eq("product_id", product.id)
+          .order("created_at", { ascending: true })
+        
+        if (error) {
+          console.error("[PRODUCTS] Error loading detail variants:", error)
+          setDetailVariants([])
+        } else if (data) {
+          setDetailVariants(data.map(v => ({
+            id: v.id,
+            name: v.name,
+            additional_price: Number(v.additional_price),
+            is_active: Boolean(v.is_active),
+          })))
+        } else {
+          setDetailVariants([])
+        }
+      } catch (err) {
+        console.error("[PRODUCTS] Exception loading detail variants:", err)
+        setDetailVariants([])
+      }
+    } else {
+      setDetailVariants([])
+    }
   }
 
-  const openDialog = (product?: ProductView) => {
+  const openDialog = async (product?: ProductView) => {
     if (product) {
       setEditingProduct(product)
       setNewProductId(null)
@@ -214,6 +264,37 @@ export default function ProductsPage() {
       setImagePreviewUrl(product.image || null)
       setCrop({ x: 0, y: 0 })
       setZoom(1)
+      
+      // Load variants
+      if (supabaseClient) {
+        try {
+          const { data, error } = await supabaseClient
+            .from("product_variants")
+            .select("id, name, additional_price, is_active")
+            .eq("product_id", product.id)
+            .order("created_at", { ascending: true })
+          
+          if (error) {
+            console.error("[PRODUCTS] Error loading variants:", error)
+            setVariants([])
+          } else if (data) {
+            console.log("[PRODUCTS] Loaded variants:", data.length)
+            setVariants(data.map(v => ({
+              id: v.id,
+              name: v.name,
+              additional_price: Number(v.additional_price),
+              is_active: Boolean(v.is_active),
+            })))
+          } else {
+            setVariants([])
+          }
+        } catch (err) {
+          console.error("[PRODUCTS] Exception loading variants:", err)
+          setVariants([])
+        }
+      } else {
+        setVariants([])
+      }
     } else {
       setEditingProduct(null)
       // Generate id untuk produk baru (dipakai sebagai nama file upload)
@@ -236,8 +317,14 @@ export default function ProductsPage() {
       setImagePreviewUrl(null)
       setCrop({ x: 0, y: 0 })
       setZoom(1)
+      setVariants([])
     }
     setDialogError(null)
+    // Set dialog open after variants are loaded (if editing)
+    if (product) {
+      // Wait a bit to ensure variants state is set
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
     setIsDialogOpen(true)
   }
 
@@ -248,6 +335,7 @@ export default function ProductsPage() {
     setNewProductId(null)
     setImageFile(null)
     setImagePreviewUrl(null)
+    setVariants([])
     setCrop({ x: 0, y: 0 })
     setZoom(1)
   }
@@ -255,6 +343,7 @@ export default function ProductsPage() {
   const closeDetailDialog = () => {
     setIsDetailOpen(false)
     setDetailProduct(null)
+    setDetailVariants([])
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -336,27 +425,62 @@ export default function ProductsPage() {
     }
 
     try {
+      let productId: string
+
       if (editingProduct) {
         if (!editingProduct.id) {
           setDialogError("ID produk tidak valid.")
           return
         }
+        productId = editingProduct.id
         const { data, error } = await supabaseClient
           .from("products")
           .update(payload)
-          .eq("id", editingProduct.id)
+          .eq("id", productId)
           .select()
           .single()
 
         if (error) throw error
 
-        setProducts((prev) => prev.map((p) => (p.id === editingProduct.id ? { ...p, ...(data as any) } : p)))
+        setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, ...(data as any) } : p)))
       } else {
         const { data, error } = await supabaseClient.from("products").insert(payload).select().single()
 
         if (error) throw error
 
+        productId = data.id
         setProducts((prev) => [...prev, data as any])
+      }
+
+      // Save variants
+      if (productId) {
+        // Delete existing variants first (if editing)
+        if (editingProduct) {
+          await supabaseClient
+            .from("product_variants")
+            .delete()
+            .eq("product_id", productId)
+        }
+
+        // Insert new variants
+        if (variants.length > 0) {
+          const variantsToInsert = variants
+            .filter(v => v.name.trim() !== "")
+            .map(v => ({
+              product_id: productId,
+              name: v.name.trim(),
+              additional_price: v.additional_price,
+              is_active: v.is_active,
+            }))
+
+          if (variantsToInsert.length > 0) {
+            const { error: variantError } = await supabaseClient
+              .from("product_variants")
+              .insert(variantsToInsert)
+
+            if (variantError) throw variantError
+          }
+        }
       }
 
       closeDialog()
@@ -365,9 +489,48 @@ export default function ProductsPage() {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Yakin ingin menghapus produk ini?")) return
+  const addVariant = () => {
+    setVariants([...variants, { name: "", additional_price: 0, is_active: true }])
+  }
 
+  const removeVariant = (index: number) => {
+    setVariants(variants.filter((_, i) => i !== index))
+  }
+
+  const updateVariant = (index: number, field: keyof ProductVariant, value: string | number | boolean) => {
+    const updated = [...variants]
+    updated[index] = { ...updated[index], [field]: value }
+    setVariants(updated)
+  }
+
+  // Helper function untuk format angka dengan separator ribuan
+  const formatNumberInput = (value: string | number): string => {
+    if (!value && value !== 0) return ""
+    const numValue = typeof value === "string" ? value.replace(/\./g, "") : value
+    const num = typeof numValue === "string" ? Number.parseFloat(numValue) : numValue
+    if (Number.isNaN(num)) return ""
+    return formatNumber(num)
+  }
+
+  // Helper function untuk parse input angka (hilangkan separator)
+  const parseNumberInput = (value: string): string => {
+    return value.replace(/\./g, "")
+  }
+
+  // Handler untuk input harga
+  const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = parseNumberInput(e.target.value)
+    setFormData({ ...formData, price: rawValue })
+  }
+
+  // Handler untuk input harga tambahan varian
+  const handleVariantPriceChange = (index: number, value: string) => {
+    const rawValue = parseNumberInput(value)
+    const numValue = Number.parseFloat(rawValue) || 0
+    updateVariant(index, "additional_price", numValue)
+  }
+
+  const handleDelete = async (id: string) => {
     if (!supabaseClient) {
       setError("Konfigurasi Supabase belum lengkap. Hubungi administrator.")
       return
@@ -419,64 +582,85 @@ export default function ProductsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
         {filteredProducts.map((product) => (
           <Card key={product.id} className="flex flex-col overflow-hidden shadow-sm hover:shadow-md transition-shadow">
             <div className="aspect-square relative bg-muted">
               <Image src={product.image || "/placeholder.svg"} alt={product.name} fill className="object-cover" />
             </div>
-            <CardContent className="flex flex-col flex-1 p-4">
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1">
-                  <h3 className="font-semibold mb-1 truncate">{product.name}</h3>
-                  <Badge variant="secondary" className="text-[10px]">
+            <CardContent className="flex flex-col flex-1 p-3">
+              <div className="flex items-start justify-between mb-1.5">
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-sm mb-1 truncate leading-tight">{product.name}</h3>
+                  <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
                     {product.categoryName}
                   </Badge>
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground mb-2">
-                {product.description.length > 15
-                  ? `${product.description.slice(0, 15)}...`
-                  : product.description || "-"}
+              <p className="text-[10px] text-muted-foreground mb-1.5 line-clamp-2 leading-tight">
+                {product.description ? (product.description.length > 20 ? `${product.description.slice(0, 20)}...` : product.description) : "-"}
               </p>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-lg font-bold text-primary">{formatCurrency(product.price)}</span>
-                <Badge variant={product.available ? "default" : "secondary"}>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-bold text-primary">{formatCurrency(product.price)}</span>
+                <Badge variant={product.available ? "default" : "secondary"} className="text-[9px] px-1.5 py-0">
                   {product.available ? "Tersedia" : "Tidak tersedia"}
                 </Badge>
               </div>
-              <div className="flex items-center justify-between mb-3 text-xs text-muted-foreground">
-                <span>
-                  Stok:{" "}
+              {product.trackStock && (
+                <div className="mb-2 text-[10px] text-muted-foreground">
+                  <span>Stok: </span>
                   <span className="font-medium text-foreground">
                     {typeof product.stockQuantity === "number" ? product.stockQuantity : 0}
                   </span>
-                </span>
-                <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]">
-                  {product.trackStock ? "Dipantau" : "Tidak dipantau"}
-                </span>
-              </div>
-              <div className="mt-auto flex gap-2">
+                </div>
+              )}
+              <div className="mt-auto flex gap-1.5">
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="flex-1 bg-transparent"
+                  size="icon"
+                  className="bg-transparent h-7 w-7"
                   onClick={() => openDetailDialog(product)}
+                  title="Detail"
                 >
-                  Detail
+                  <Eye className="h-3.5 w-3.5" />
+                  <span className="sr-only">Detail</span>
                 </Button>
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="flex-1 bg-transparent"
+                  size="icon"
+                  className="bg-transparent h-7 w-7"
                   onClick={() => openDialog(product)}
+                  title="Edit"
                 >
-                  <Pencil className="h-3 w-3 mr-1" />
-                  Edit
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span className="sr-only">Edit</span>
                 </Button>
-                <Button variant="destructive" size="sm" onClick={() => handleDelete(product.id)}>
-                  <Trash2 className="h-3 w-3" />
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="icon" className="h-7 w-7" title="Hapus">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span className="sr-only">Hapus produk</span>
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Hapus Produk</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Produk ini akan dihapus dari daftar menu. Tindakan ini tidak dapat dibatalkan.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Batal</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => {
+                          void handleDelete(product.id)
+                        }}
+                      >
+                        Hapus
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </CardContent>
           </Card>
@@ -538,14 +722,51 @@ export default function ProductsPage() {
                       {detailProduct.available ? "Tersedia" : "Tidak tersedia"}
                     </Badge>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-muted-foreground">Stok</p>
-                    <p className="font-semibold">
-                      {typeof detailProduct.stockQuantity === "number" ? detailProduct.stockQuantity : 0}
-                      {detailProduct.trackStock ? " (dipantau)" : ""}
-                    </p>
-                  </div>
+                  {detailProduct.trackStock && (
+                    <div className="space-y-1">
+                      <p className="text-muted-foreground">Stok</p>
+                      <p className="font-semibold">
+                        {typeof detailProduct.stockQuantity === "number" ? detailProduct.stockQuantity : 0}
+                      </p>
+                    </div>
+                  )}
                 </div>
+
+                {/* Variants Section */}
+                {detailVariants.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-muted-foreground">Varian Produk</p>
+                      <Badge variant="secondary" className="text-xs">
+                        {detailVariants.length} varian
+                      </Badge>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {detailVariants.map((variant) => (
+                        <div key={variant.id || variant.name} className="flex items-center justify-between p-2 bg-muted/50 rounded-md text-sm">
+                          <div className="flex-1">
+                            <div className="font-medium">{variant.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              Harga tambahan: {variant.additional_price > 0 ? "+" : ""}
+                              {formatCurrency(variant.additional_price)}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={variant.is_active ? "default" : "secondary"} className="text-xs">
+                              {variant.is_active ? "Aktif" : "Nonaktif"}
+                            </Badge>
+                            <div className="text-right">
+                              <div className="font-semibold">
+                                {formatCurrency(detailProduct.price + variant.additional_price)}
+                              </div>
+                              <div className="text-xs text-muted-foreground">Total</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={closeDetailDialog}>
@@ -638,19 +859,20 @@ export default function ProductsPage() {
 
               {/* Price, stock, category */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
+                <div className="space-y-1">
                   <Label htmlFor="price">Harga</Label>
                   <Input
                     id="price"
-                    type="number"
-                    step="0.01"
-                    value={formData.price}
-                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    type="text"
+                    inputMode="numeric"
+                    value={formData.price ? formatNumberInput(formData.price) : ""}
+                    onChange={handlePriceChange}
+                    placeholder="0"
                     required
                   />
                 </div>
                 {formData.trackStock && (
-                  <div>
+                  <div className="space-y-1">
                     <Label htmlFor="stockQuantity">Jumlah Stok</Label>
                     <Input
                       id="stockQuantity"
@@ -661,7 +883,7 @@ export default function ProductsPage() {
                     />
                   </div>
                 )}
-                <div className={formData.trackStock ? "" : "sm:col-span-2"}>
+                <div className={`space-y-1 ${formData.trackStock ? "" : "sm:col-span-2"}`}>
                   <Label htmlFor="category">Kategori</Label>
                   <Select
                     value={formData.categoryId}
@@ -680,6 +902,75 @@ export default function ProductsPage() {
                   </Select>
                 </div>
               </div>
+              
+              {/* Variants Section */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Varian Produk</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addVariant}
+                    className="h-7 text-xs"
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Tambah Varian
+                  </Button>
+                </div>
+                {variants.length > 0 && (
+                  <div className="space-y-2 max-h-40 overflow-y-auto border rounded-md p-2">
+                    {variants.map((variant, index) => (
+                      <div key={variant.id || `variant-${index}`} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md">
+                        <div className="flex-1 space-y-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs">Nama Varian</Label>
+                            <Input
+                              placeholder="Contoh: Large, Extra Cheese"
+                              value={variant.name}
+                              onChange={(e) => updateVariant(index, "name", e.target.value)}
+                              className="text-sm h-8"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Harga Tambahan</Label>
+                            <Input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="0 untuk tidak ada perubahan"
+                              value={variant.additional_price ? formatNumberInput(variant.additional_price) : ""}
+                              onChange={(e) => handleVariantPriceChange(index, e.target.value)}
+                              className="text-sm h-8"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="flex items-center gap-2">
+                            <Label className="text-xs whitespace-nowrap">Aktif</Label>
+                            <Switch
+                              checked={variant.is_active}
+                              onCheckedChange={(checked) => updateVariant(index, "is_active", checked)}
+                            />
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => removeVariant(index)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {variants.length === 0 && (
+                  <p className="text-xs text-muted-foreground italic">Tidak ada varian. Klik "Tambah Varian" untuk menambahkan.</p>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <Label>Gambar Produk</Label>
                 <div className="grid grid-cols-1 gap-3">

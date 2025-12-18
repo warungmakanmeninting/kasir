@@ -1,6 +1,57 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAdminClient, requireAdmin } from "../../users/route"
 
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const { id } = await context.params
+
+  // Validasi UUID format
+  if (!id || id === "undefined" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return NextResponse.json({ error: "ID struk tidak valid." }, { status: 400 })
+  }
+
+  try {
+    const result = await requireAdmin(req)
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: result.status })
+    }
+
+    const supabase = getAdminClient()
+
+    // Get receipt
+    const { data: receipt, error: receiptError } = await supabase
+      .from("receipts")
+      .select("*")
+      .eq("id", id)
+      .single()
+
+    if (receiptError || !receipt) {
+      return NextResponse.json({ error: "Receipt not found" }, { status: 404 })
+    }
+
+    // Get order with items and payments
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select(`
+        *,
+        order_items (*),
+        payments (
+          *,
+          payment_methods (*)
+        )
+      `)
+      .eq("id", receipt.order_id)
+      .single()
+
+    if (orderError) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 })
+    }
+
+    return NextResponse.json({ receipt, order })
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Terjadi kesalahan tak terduga." }, { status: 500 })
+  }
+}
+
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params
 

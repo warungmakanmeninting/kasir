@@ -37,9 +37,20 @@ export default function LoginPage() {
         return
       }
 
-      // Gunakan role yang disimpan di metadata supaya selaras dengan skema profiles/has_role
+      // Get role from database (profiles table)
       const user = data.user
-      const role = (user?.user_metadata?.role as string | undefined) ?? "cashier"
+      const { data: profile } = await supabaseClient
+        .from("profiles")
+        .select("role, is_active")
+        .eq("id", user.id)
+        .single()
+
+      if (!profile || !profile.is_active) {
+        setError("Akun tidak aktif. Hubungi administrator.")
+        return
+      }
+
+      const role = profile.role as string
 
       if (role === "admin" || role === "manager") {
         router.replace("/admin")

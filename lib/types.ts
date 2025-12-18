@@ -14,6 +14,7 @@ export interface OrderItem {
   productName: string
   quantity: number
   price: number
+  category?: string
 }
 
 export interface Order {

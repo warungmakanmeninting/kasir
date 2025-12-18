@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get("authorization") ?? ""
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null
     if (!token) {
+      console.error("[ORDERS API] Missing access token")
       return NextResponse.json({ error: "Missing access token" }, { status: 401 })
     }
 
@@ -27,11 +28,14 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser(token)
 
     if (userError || !user) {
+      console.error("[ORDERS API] Invalid access token:", userError?.message)
       return NextResponse.json({ error: "Invalid access token" }, { status: 401 })
     }
 
+    console.log("[ORDERS API] User authenticated:", user.id)
+
     const body = await req.json()
-    const { items, customer_name, table_number, order_type, note, payment_method_id, subtotal, tax, total } = body as {
+    const { items, customer_name, table_number, order_type, note, payment_method_id, subtotal, tax, total, amount_paid, change_given } = body as {
       items: Array<{ product_id: string; product_name: string; quantity: number; price: number }>
       customer_name?: string
       table_number?: string
@@ -41,6 +45,8 @@ export async function POST(req: NextRequest) {
       subtotal: number
       tax: number
       total: number
+      amount_paid?: number
+      change_given?: number
     }
 
     if (!items || items.length === 0) {
@@ -51,54 +57,122 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Metode pembayaran wajib dipilih" }, { status: 400 })
     }
 
+    // Check bypass_kitchen_menu setting
+    const { data: bypassSetting } = await supabase
+      .from("settings")
+      .select("value")
+      .eq("key", "bypass_kitchen_menu")
+      .single()
+    
+    const bypassKitchen = bypassSetting?.value?.toLowerCase() === "true"
+    
+    // Determine order status based on bypass setting
+    // If bypass_kitchen_menu = true, order is directly completed
+    // If bypass_kitchen_menu = false or not set, order starts as pending
+    const orderStatus = bypassKitchen ? "completed" : "pending"
+    const completedAt = bypassKitchen ? new Date().toISOString() : null
+
     // Create order
+    // Note: schema uses 'note' (singular) in init migration, but cleanup migration adds 'notes' (plural)
+    // Using 'note' to match the original schema definition
+    const orderData: Record<string, any> = {
+      customer_name: customer_name || null,
+      table_number: table_number || null,
+      order_type: order_type || "dine_in",
+      note: note || null,
+      cashier_id: user.id,
+      payment_method_id,
+      // financials - keep in sync with schema
+      subtotal: Number(subtotal),
+      discount_amount: 0,
+      service_charge: 0,
+      tax_amount: Number(tax),
+      total: Number(total),
+      // Payment status is always paid when order is created from POS
+      payment_status: "paid",
+      // Order status depends on bypass_kitchen_menu setting
+      status: orderStatus,
+      // If bypass kitchen, mark as completed immediately
+      completed_at: completedAt,
+    }
+
+    console.log("[ORDERS API] Creating order with data:", JSON.stringify(orderData, null, 2))
+
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .insert({
-        customer_name,
-        table_number,
-        order_type: order_type || "dine_in",
-        note,
-        cashier_id: user.id,
-        payment_method_id,
-        // financials - keep in sync with schema
-        subtotal,
-        discount_amount: 0,
-        service_charge: 0,
-        tax_amount: tax,
-        total,
-        // mark as paid & completed
-        payment_status: "paid",
-        status: "completed",
-      })
+      .insert(orderData)
       .select()
       .single()
 
     if (orderError) {
-      return NextResponse.json({ error: orderError.message }, { status: 500 })
+      console.error("[ORDERS API] Order creation failed:", orderError)
+      return NextResponse.json({ error: `Failed to create order: ${orderError.message}` }, { status: 500 })
     }
+
+    if (!order) {
+      console.error("[ORDERS API] Order created but no data returned")
+      return NextResponse.json({ error: "Order created but no data returned" }, { status: 500 })
+    }
+
+    console.log("[ORDERS API] Order created successfully:", order.id)
 
     // Create order items
+    // Note: 'price' column is added in cleanup migration, but may not exist in all databases
+    // We'll include it but it's optional - unit_price is the main column
     const orderItems = items.map((item) => ({
       order_id: order.id,
-      product_id: item.product_id,
+      product_id: item.product_id || null,
       product_name: item.product_name,
-      unit_price: item.price,
-      quantity: item.quantity,
-      // optional helper column
-      price: item.price,
+      unit_price: Number(item.price),
+      quantity: Number(item.quantity),
+      // Optional helper column (added in cleanup migration)
+      price: Number(item.price),
     }))
 
-    const { error: itemsError } = await supabase.from("order_items").insert(orderItems)
+    console.log("[ORDERS API] Creating order items:", orderItems.length, "items")
+
+    const { error: itemsError, data: insertedItems } = await supabase.from("order_items").insert(orderItems).select()
 
     if (itemsError) {
+      console.error("[ORDERS API] Order items creation failed:", itemsError)
       // Rollback order if items fail
       await supabase.from("orders").delete().eq("id", order.id)
-      return NextResponse.json({ error: itemsError.message }, { status: 500 })
+      return NextResponse.json({ error: `Failed to create order items: ${itemsError.message}` }, { status: 500 })
     }
 
+    console.log("[ORDERS API] Order items created successfully:", insertedItems?.length || 0, "items")
+
+    // Create payment record - MUST be created for every order since payment_status is "paid"
+    // If amount_paid is not provided, use total as amount_paid (for non-cash payments like QRIS, transfer)
+    const paymentAmount = amount_paid !== undefined ? Number(amount_paid) : Number(total)
+    const paymentChange = change_given !== undefined ? Number(change_given) : 0
+
+    const paymentData = {
+      order_id: order.id,
+      payment_method_id,
+      amount: paymentAmount,
+      change_given: paymentChange,
+      received_by: user.id,
+    }
+
+    console.log("[ORDERS API] Creating payment record:", JSON.stringify(paymentData, null, 2))
+
+    const { error: paymentError, data: payment } = await supabase.from("payments").insert(paymentData).select().single()
+
+    if (paymentError) {
+      console.error("[ORDERS API] Payment creation failed:", paymentError)
+      // Rollback order and items if payment record creation fails
+      await supabase.from("order_items").delete().eq("order_id", order.id)
+      await supabase.from("orders").delete().eq("id", order.id)
+      return NextResponse.json({ error: `Failed to create payment record: ${paymentError.message}` }, { status: 500 })
+    }
+
+    console.log("[ORDERS API] Payment created successfully:", payment?.id)
+
+    console.log("[ORDERS API] Order creation completed successfully:", order.id)
     return NextResponse.json({ order }, { status: 201 })
   } catch (err: any) {
+    console.error("[ORDERS API] Unexpected error:", err)
     return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 })
   }
 }

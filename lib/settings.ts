@@ -12,6 +12,7 @@ export interface AppSettings {
   tax_rate: number
   receipt_footer: string
   auto_print_receipt: boolean
+  bypass_kitchen_menu: boolean
 }
 
 // Default settings (fallback)
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   tax_rate: 10,
   receipt_footer: "Terima Kasih Atas Kunjungan Anda",
   auto_print_receipt: true,
+  bypass_kitchen_menu: false, // Default: kitchen enabled
 }
 
 // Cache settings in memory
@@ -64,6 +66,7 @@ export async function loadSettings(forceRefresh = false): Promise<AppSettings> {
           break
         }
         case "auto_print_receipt":
+        case "bypass_kitchen_menu":
           settings[key] = value.toLowerCase() === "true"
           break
         default:

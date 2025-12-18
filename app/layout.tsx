@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { StoreProvider } from "@/lib/store"
 import { AuthGuard } from "@/components/auth-guard"
+import { Toaster } from "@/components/ui/sonner"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
@@ -30,6 +31,7 @@ export default function RootLayout({
         <StoreProvider>
           <AuthGuard>{children}</AuthGuard>
         </StoreProvider>
+        <Toaster />
         <Analytics />
       </body>
     </html>

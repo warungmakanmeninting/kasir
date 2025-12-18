@@ -15,7 +15,11 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { supabaseClient } from "@/lib/supabaseClient"
-import { Search, Receipt as ReceiptIcon, Trash2 } from "lucide-react"
+import { getPrinterInstance, type ReceiptData } from "@/lib/bluetooth-printer"
+import { loadSettings } from "@/lib/settings"
+import { formatCurrency } from "@/lib/currency"
+import { toast } from "sonner"
+import { Search, Receipt as ReceiptIcon, Trash2, Printer } from "lucide-react"
 
 type ReceiptRow = {
   id: string
@@ -32,6 +36,9 @@ export default function ReceiptsPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [copyTypeFilter, setCopyTypeFilter] = useState<"all" | "original" | "reprint">("all")
+  const [printerConnected, setPrinterConnected] = useState(false)
+  const [connectingPrinter, setConnectingPrinter] = useState(false)
+  const [reprintingReceiptId, setReprintingReceiptId] = useState<string | null>(null)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -83,6 +90,197 @@ export default function ReceiptsPage() {
 
     loadReceipts()
   }, [])
+
+  // Cek status koneksi printer saat pertama kali load
+  useEffect(() => {
+    try {
+      const printer = getPrinterInstance()
+      setPrinterConnected(printer.isConnected())
+    } catch {
+      // Abaikan error jika bluetooth tidak tersedia
+    }
+  }, [])
+
+  const handleConnectPrinter = async () => {
+    try {
+      setConnectingPrinter(true)
+      const printer = getPrinterInstance()
+      const ok = await printer.connect()
+      setPrinterConnected(ok)
+
+      if (!ok) {
+        toast.error("Gagal terhubung ke printer", {
+          description: "Pastikan printer menyala dan bluetooth aktif.",
+        })
+      } else {
+        toast.success("Printer berhasil terhubung")
+      }
+    } catch {
+      toast.error("Terjadi kesalahan saat menghubungkan ke printer")
+    } finally {
+      setConnectingPrinter(false)
+    }
+  }
+
+  const handleReprint = async (receipt: ReceiptRow) => {
+    if (!supabaseClient) {
+      toast.error("Konfigurasi Supabase belum lengkap")
+      return
+    }
+
+    // Check printer connection
+    let isPrinterReady = printerConnected
+    try {
+      const printer = getPrinterInstance()
+      isPrinterReady = printer.isConnected()
+      if (!isPrinterReady) {
+        setPrinterConnected(false)
+      }
+    } catch {
+      isPrinterReady = false
+    }
+
+    if (!isPrinterReady) {
+      const connect = confirm("Printer belum terhubung. Hubungkan printer terlebih dahulu?")
+      if (connect) {
+        await handleConnectPrinter()
+        // Re-check connection after attempting to connect
+        try {
+          const printer = getPrinterInstance()
+          isPrinterReady = printer.isConnected()
+          setPrinterConnected(isPrinterReady)
+        } catch {
+          isPrinterReady = false
+        }
+        if (!isPrinterReady) {
+          toast.error("Gagal terhubung ke printer", {
+            description: "Silakan hubungkan printer terlebih dahulu.",
+          })
+          return
+        }
+      } else {
+        return
+      }
+    }
+
+    try {
+      setReprintingReceiptId(receipt.id)
+      setError(null)
+
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession()
+
+      if (!session) {
+        toast.error("Sesi login tidak ditemukan", {
+          description: "Silakan login kembali.",
+        })
+        return
+      }
+
+      // Get receipt detail with order data
+      const res = await fetch(`/api/admin/receipts/${receipt.id}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      })
+
+      const json = await res.json()
+      if (!res.ok) {
+        toast.error("Gagal memuat data struk", {
+          description: json.error ?? "Terjadi kesalahan saat memuat data.",
+        })
+        return
+      }
+
+      const { receipt: receiptDetail, order } = json
+
+      if (!order) {
+        toast.error("Data order tidak ditemukan")
+        return
+      }
+
+      // Load settings
+      const settings = await loadSettings()
+
+      // Get payment method name
+      let paymentMethodName = "Belum dibayar"
+      if (order.payments && order.payments.length > 0) {
+        const payment = order.payments[0]
+        if (payment.payment_methods) {
+          paymentMethodName = payment.payment_methods.name || "Sudah dibayar"
+        } else {
+          paymentMethodName = "Sudah dibayar"
+        }
+      }
+
+      // Get cashier name from session user
+      const cashierName = session.user.user_metadata?.full_name || session.user.email || "Kasir"
+
+      // Prepare receipt data for printing
+      const receiptData: ReceiptData = {
+        receiptNumber: receiptDetail.receipt_number?.toString() || "N/A",
+        orderDate: new Date(order.created_at),
+        customerName: order.customer_name || undefined,
+        tableNumber: order.table_number || undefined,
+        items: (order.order_items || []).map((item: any) => ({
+          name: item.product_name,
+          quantity: item.quantity,
+          price: Number(item.unit_price),
+          total: Number(item.total),
+        })),
+        subtotal: Number(order.subtotal),
+        tax: Number(order.tax_amount),
+        total: Number(order.total),
+        paymentMethod: paymentMethodName,
+        cashier: cashierName,
+        restaurantName: settings.restaurant_name,
+        restaurantAddress: settings.restaurant_address,
+        restaurantPhone: settings.restaurant_phone,
+        footerMessage: settings.receipt_footer,
+        taxRate: settings.tax_rate,
+      }
+
+      // Print receipt
+      const printer = getPrinterInstance()
+      const printed = await printer.printReceipt(receiptData)
+
+      if (!printed) {
+        toast.error("Gagal mencetak struk", {
+          description: "Pastikan printer terhubung dan siap.",
+        })
+      } else {
+        toast.success("Struk berhasil dicetak ulang")
+        // Create new receipt entry for reprint
+        const receiptRes = await fetch("/api/admin/receipts", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            order_id: order.id,
+            copy_type: "reprint",
+            snapshot: {
+              reprinted_from: receiptDetail.id,
+              reprinted_at: new Date().toISOString(),
+            },
+          }),
+        })
+
+        if (receiptRes.ok) {
+          const { receipt: newReceipt } = await receiptRes.json()
+          setReceipts((prev) => [newReceipt, ...prev])
+        }
+      }
+    } catch (err: any) {
+      toast.error("Terjadi kesalahan saat mencetak ulang struk", {
+        description: err?.message,
+      })
+    } finally {
+      setReprintingReceiptId(null)
+    }
+  }
 
   const filteredReceipts = useMemo(
     () =>
@@ -218,14 +416,42 @@ export default function ReceiptsPage() {
       )}
 
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="relative max-w-xs">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Cari no struk atau ID order..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative max-w-xs">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Cari no struk atau ID order..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleConnectPrinter}
+              disabled={connectingPrinter}
+              className="flex items-center gap-2"
+            >
+              <Printer className="h-4 w-4" />
+              <span className="text-xs">
+                {connectingPrinter
+                  ? "Menghubungkan..."
+                  : printerConnected
+                    ? "Printer terhubung"
+                    : "Hubungkan printer"}
+              </span>
+            </Button>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  printerConnected ? "bg-emerald-500" : "bg-red-500"
+                }`}
+              />
+              <span>{printerConnected ? "Siap cetak" : "Belum terhubung"}</span>
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <span>Tipe:</span>
@@ -279,15 +505,27 @@ export default function ReceiptsPage() {
                 {new Date(r.printed_at).toLocaleString("id-ID")}
               </TableCell>
               <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                  title="Hapus struk"
-                  onClick={() => handleDeleteReceipt(r)}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
+                <div className="flex items-center justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Cetak ulang struk"
+                    onClick={() => handleReprint(r)}
+                    disabled={reprintingReceiptId === r.id}
+                  >
+                    <Printer className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    title="Hapus struk"
+                    onClick={() => handleDeleteReceipt(r)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           ))}

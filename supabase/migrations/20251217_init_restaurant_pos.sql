@@ -57,7 +57,7 @@ create table public.product_variants (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references public.products(id) on delete cascade,
   name text not null,                              -- contoh: Large, Extra Cheese
-  price_delta numeric(12,2) not null default 0,   -- penyesuaian dari harga dasar produk
+  additional_price numeric(12,2) not null default 0,   -- penyesuaian dari harga dasar produk
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

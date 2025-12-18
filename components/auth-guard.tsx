@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { supabaseClient } from "@/lib/supabaseClient"
+import { getUserRole, canAccessRoute, getDefaultRouteForRole, type UserRole } from "@/lib/role-guard"
 
 const PUBLIC_PATHS = ["/login"]
 
@@ -51,8 +52,29 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         }
 
         if (session && isPublicPath) {
-          router.replace("/")
+          // Redirect to default route based on role
+          const role = await getUserRole()
+          const defaultRoute = getDefaultRouteForRole(role)
+          router.replace(defaultRoute)
           return
+        }
+
+        // Check role-based access for protected paths
+        if (session && !isPublicPath) {
+          const role = await getUserRole()
+          
+          if (!role) {
+            router.replace("/login")
+            return
+          }
+
+          // Check if user can access this route
+          if (!canAccessRoute(role, pathname)) {
+            // Redirect to default route for their role
+            const defaultRoute = getDefaultRouteForRole(role)
+            router.replace(defaultRoute)
+            return
+          }
         }
 
         if (isMounted) {

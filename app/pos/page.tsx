@@ -9,16 +9,26 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useStore } from "@/lib/store"
 import type { OrderItem } from "@/lib/types"
-import { Minus, Plus, ShoppingCart, Trash2, X, ArrowLeft, Printer } from "lucide-react"
+import { Minus, Plus, ShoppingCart, Trash2, X, ArrowLeft, Printer, Search } from "lucide-react"
 import Link from "next/link"
 import Image from "next/image"
 import { supabaseClient } from "@/lib/supabaseClient"
 import { formatCurrency } from "@/lib/currency"
-import { PaymentModal } from "@/components/payment-modal"
 import { loadSettings } from "@/lib/settings"
-import { getPrinterInstance } from "@/lib/bluetooth-printer"
+import { getPrinterInstance, type ReceiptData } from "@/lib/bluetooth-printer"
+import { toast } from "sonner"
+import { getUserRole, getDefaultRouteForRole } from "@/lib/role-guard"
+import { useRouter } from "next/navigation"
 
 type CategoryRow = {
   id: string
@@ -33,27 +43,61 @@ type ProductRow = {
   category_id: string | null
   image_url: string | null
   is_available: boolean
+  stock_quantity: number
+  track_stock: boolean
+}
+
+type ProductVariant = {
+  id: string
+  name: string
+  additional_price: number
+  is_active: boolean
 }
 
 export default function POSPage() {
+  const router = useRouter()
   const { createOrder } = useStore()
   const [cart, setCart] = useState<OrderItem[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [customerName, setCustomerName] = useState("")
   const [tableNumber, setTableNumber] = useState("")
+  const [checkingRole, setCheckingRole] = useState(true)
 
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [productRows, setProductRows] = useState<ProductRow[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [dataError, setDataError] = useState<string | null>(null)
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const [taxRate, setTaxRate] = useState(10) // default 10%
   const [restaurantName, setRestaurantName] = useState("Cashier POS")
   const [printerConnected, setPrinterConnected] = useState(false)
   const [connectingPrinter, setConnectingPrinter] = useState(false)
   const [orderType, setOrderType] = useState<"dine_in" | "takeaway" | "gojek" | "grab" | "shopeefood">("dine_in")
   const [orderNote, setOrderNote] = useState("")
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [processingCheckout, setProcessingCheckout] = useState(false)
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
+  const [paymentMethods, setPaymentMethods] = useState<Array<{ id: string; code: string; name: string }>>([])
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("")
+  const [loadingPaymentMethods, setLoadingPaymentMethods] = useState(false)
+  const [amountPaid, setAmountPaid] = useState<string>("")
+  const [productVariants, setProductVariants] = useState<Record<string, ProductVariant[]>>({})
+  const [isVariantDialogOpen, setIsVariantDialogOpen] = useState(false)
+  const [selectedProductForVariant, setSelectedProductForVariant] = useState<ProductRow | null>(null)
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
+
+  // Check role authorization
+  useEffect(() => {
+    const checkRole = async () => {
+      const role = await getUserRole()
+      if (role !== "cashier" && role !== "admin" && role !== "manager") {
+        const defaultRoute = getDefaultRouteForRole(role)
+        router.replace(defaultRoute)
+        return
+      }
+      setCheckingRole(false)
+    }
+    checkRole()
+  }, [router])
 
   useEffect(() => {
     const loadData = async () => {
@@ -79,16 +123,37 @@ export default function POSPage() {
             .order("sort_order", { ascending: true }),
           supabaseClient
             .from("products")
-            .select("id, name, description, price, category_id, image_url, is_available, created_at")
+            .select("id, name, description, price, category_id, image_url, is_available, stock_quantity, track_stock, created_at")
             .eq("is_available", true)
             .order("created_at", { ascending: true }),
         ])
 
         if (catRes.error) {
+          console.error("[POS] Error loading categories:", catRes.error)
           throw catRes.error
         }
         if (prodRes.error) {
+          console.error("[POS] Error loading products:", prodRes.error)
           throw prodRes.error
+        }
+
+        // Load variants separately - not critical if it fails
+        let variantRes: { data: any[] | null; error: any } = { data: [], error: null }
+        try {
+          const variantResult = await supabaseClient
+            .from("product_variants")
+            .select("id, product_id, name, additional_price, is_active")
+            .eq("is_active", true)
+          
+          if (variantResult.error) {
+            console.warn("[POS] Warning: Failed to load variants (non-critical):", variantResult.error)
+            // Continue without variants - not a fatal error
+          } else {
+            variantRes = variantResult
+          }
+        } catch (variantErr: any) {
+          console.warn("[POS] Warning: Exception loading variants (non-critical):", variantErr?.message || variantErr)
+          // Continue without variants - not a fatal error
         }
 
         setCategories(
@@ -107,10 +172,35 @@ export default function POSPage() {
             category_id: (p.category_id as string | null) ?? null,
             image_url: (p.image_url as string | null) ?? null,
             is_available: Boolean(p.is_available),
+            stock_quantity: Number(p.stock_quantity || 0),
+            track_stock: Boolean(p.track_stock),
           })),
         )
-      } catch (err) {
-        setDataError("Gagal memuat data produk dari database. Silakan coba lagi atau hubungi administrator.")
+
+        // Group variants by product_id
+        const variantsByProduct: Record<string, ProductVariant[]> = {}
+        if (variantRes && variantRes.data) {
+          ;(variantRes.data ?? []).forEach((v: any) => {
+            const productId = v.product_id as string
+            if (!variantsByProduct[productId]) {
+              variantsByProduct[productId] = []
+            }
+            variantsByProduct[productId].push({
+              id: v.id as string,
+              name: v.name as string,
+              additional_price: Number(v.additional_price),
+              is_active: Boolean(v.is_active),
+            })
+          })
+        }
+        setProductVariants(variantsByProduct)
+      } catch (err: any) {
+        console.error("[POS] Error loading data:", err)
+        setDataError(
+          err?.message 
+            ? `Gagal memuat data: ${err.message}` 
+            : "Gagal memuat data produk dari database. Silakan coba lagi atau hubungi administrator."
+        )
       } finally {
         setLoadingData(false)
       }
@@ -144,23 +234,100 @@ export default function POSPage() {
         name: p.name,
         description: p.description ?? "",
         price: p.price,
-        category: p.category_id ? categoryNameById.get(p.category_id) ?? "Uncategorized" : "Uncategorized",
+        category: p.category_id ? categoryNameById.get(p.category_id) ?? "Tidak Terkategori" : "Tidak Terkategori",
         image: p.image_url ?? "/placeholder.svg",
         available: p.is_available,
+        stockQuantity: p.stock_quantity,
+        trackStock: p.track_stock,
       })),
     [productRows, categoryNameById],
   )
 
-  const filteredProducts =
-    selectedCategory === "all" ? products : products.filter((p) => p.category === selectedCategory)
+  const filteredProducts = useMemo(() => {
+    let filtered = selectedCategory === "all" 
+      ? products 
+      : products.filter((p) => p.category === selectedCategory)
+    
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim()
+      filtered = filtered.filter((p) => 
+        p.name.toLowerCase().includes(query) || 
+        (p.description && p.description.toLowerCase().includes(query))
+      )
+    }
+    
+    return filtered
+  }, [products, selectedCategory, searchQuery])
 
-  const addToCart = (productId: string, productName: string, price: number) => {
-    setCart((prev) => {
-      const existing = prev.find((item) => item.productId === productId)
-      if (existing) {
-        return prev.map((item) => (item.productId === productId ? { ...item, quantity: item.quantity + 1 } : item))
+  const handleProductClick = (product: { id: string; name: string; price: number; category?: string }) => {
+    const variants = productVariants[product.id] || []
+    
+    // Jika produk punya varian aktif, tampilkan dialog pemilihan varian
+    if (variants.length > 0) {
+      // Find the ProductRow to store for variant dialog
+      const productRow = productRows.find(p => p.id === product.id)
+      if (productRow) {
+        setSelectedProductForVariant(productRow)
+        setSelectedVariantId(null)
+        setIsVariantDialogOpen(true)
+      } else {
+        // Fallback: langsung tambah jika tidak ditemukan ProductRow
+        addToCart(product.id, product.name, product.price, product.category)
       }
-      return [...prev, { productId, productName, quantity: 1, price }]
+    } else {
+      // Jika tidak ada varian, langsung tambah ke cart
+      addToCart(product.id, product.name, product.price, product.category)
+    }
+  }
+
+  const handleConfirmVariantSelection = () => {
+    if (!selectedProductForVariant) return
+
+    const variants = productVariants[selectedProductForVariant.id] || []
+    let finalPrice = selectedProductForVariant.price
+
+    // Jika varian dipilih, tambahkan additional_price
+    if (selectedVariantId) {
+      const selectedVariant = variants.find(v => v.id === selectedVariantId)
+      if (selectedVariant) {
+        finalPrice = selectedProductForVariant.price + selectedVariant.additional_price
+      }
+    }
+
+    // Build product name with variant if selected
+    let productName = selectedProductForVariant.name
+    if (selectedVariantId) {
+      const selectedVariant = variants.find(v => v.id === selectedVariantId)
+      if (selectedVariant) {
+        productName = `${selectedProductForVariant.name} - ${selectedVariant.name}`
+      }
+    }
+    // If no variant selected, use base product name
+
+    // Get category from productRows
+    const category = selectedProductForVariant.category_id 
+      ? categoryNameById.get(selectedProductForVariant.category_id) ?? undefined
+      : undefined
+
+    addToCart(selectedProductForVariant.id, productName, finalPrice, category)
+    setIsVariantDialogOpen(false)
+    setSelectedProductForVariant(null)
+    setSelectedVariantId(null)
+  }
+
+  const addToCart = (productId: string, productName: string, price: number, category?: string) => {
+    setCart((prev) => {
+      // Check if same product with same name (includes variant) exists
+      const existing = prev.find((item) => item.productId === productId && item.productName === productName)
+      if (existing) {
+        return prev.map((item) => 
+          item.productId === productId && item.productName === productName 
+            ? { ...item, quantity: item.quantity + 1 } 
+            : item
+        )
+      }
+      return [...prev, { productId, productName, quantity: 1, price, category }]
     })
   }
 
@@ -188,16 +355,239 @@ export default function POSPage() {
   const tax = (subtotal * taxRate) / 100
   const total = subtotal + tax
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (cart.length === 0) return
-    setSuccessMessage(null)
-    setIsPaymentModalOpen(true)
+    if (!supabaseClient) {
+      toast.error("Konfigurasi Supabase belum lengkap")
+      return
+    }
+
+    try {
+      setLoadingPaymentMethods(true)
+      setIsPaymentDialogOpen(true)
+
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession()
+
+      if (!session) {
+        toast.error("Sesi login tidak ditemukan", {
+          description: "Silakan login kembali.",
+        })
+        setIsPaymentDialogOpen(false)
+        return
+      }
+
+      // Load payment methods
+      const { data: methods, error } = await supabaseClient
+        .from("payment_methods")
+        .select("id, code, name")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true })
+
+      if (error) throw error
+
+      if (!methods || methods.length === 0) {
+        toast.error("Tidak ada metode pembayaran yang tersedia")
+        setIsPaymentDialogOpen(false)
+        return
+      }
+
+      setPaymentMethods(methods)
+      setSelectedPaymentMethod(methods[0].code)
+      // Set default amount paid to total
+      setAmountPaid(total.toFixed(0))
+    } catch (err: any) {
+      toast.error("Gagal memuat metode pembayaran", {
+        description: err?.message,
+      })
+      setIsPaymentDialogOpen(false)
+    } finally {
+      setLoadingPaymentMethods(false)
+    }
   }
 
-  const handlePaymentComplete = () => {
-    createOrder(cart, customerName, tableNumber, orderType, orderNote)
-    clearCart()
-    setSuccessMessage("Pembayaran berhasil dan order telah dikirim ke dapur.")
+  const handleProcessCheckout = async () => {
+    if (!selectedPaymentMethod) {
+      toast.error("Pilih metode pembayaran terlebih dahulu")
+      return
+    }
+
+    const amountPaidNum = Number.parseFloat(amountPaid) || 0
+    if (amountPaidNum < total) {
+      toast.error("Jumlah pembayaran kurang", {
+        description: `Minimal pembayaran: ${formatCurrency(total)}`,
+      })
+      return
+    }
+
+    if (!supabaseClient) {
+      toast.error("Konfigurasi Supabase belum lengkap")
+      return
+    }
+
+    try {
+      setProcessingCheckout(true)
+
+      const {
+        data: { session },
+      } = await supabaseClient.auth.getSession()
+
+      if (!session) {
+        toast.error("Sesi login tidak ditemukan", {
+          description: "Silakan login kembali.",
+        })
+        return
+      }
+
+      const paymentMethod = paymentMethods.find((m) => m.code === selectedPaymentMethod)
+      if (!paymentMethod) {
+        toast.error("Metode pembayaran tidak valid")
+        return
+      }
+
+      const change = Math.max(0, amountPaidNum - total)
+
+      // Load settings
+      const settings = await loadSettings()
+
+      // Create order in database
+      const orderRes = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          items: cart.map((item) => ({
+            product_id: item.productId,
+            product_name: item.productName,
+            quantity: item.quantity,
+            price: item.price,
+          })),
+          customer_name: customerName || undefined,
+          table_number: tableNumber || undefined,
+          order_type: orderType || "dine_in",
+          note: orderNote || undefined,
+          payment_method_id: paymentMethod.id,
+          subtotal,
+          tax,
+          total,
+          amount_paid: amountPaidNum,
+          change_given: change,
+        }),
+      })
+
+      if (!orderRes.ok) {
+        const errorData = await orderRes.json()
+        console.error("[POS] Order creation failed:", errorData)
+        throw new Error(errorData.error || "Gagal menyimpan order")
+      }
+
+      const orderData = await orderRes.json()
+      const { order } = orderData
+
+      if (!order || !order.id) {
+        console.error("[POS] Order response invalid:", orderData)
+        throw new Error("Order created but invalid response")
+      }
+
+      console.log("[POS] Order created successfully:", order.id)
+
+      // Save receipt to database
+      const receiptNumber = `INV-${Date.now()}`
+      const receiptRes = await fetch("/api/receipts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          order_id: order.id,
+          copy_type: "original",
+          snapshot: {
+            order,
+            items: cart.map((item) => ({
+              productId: item.productId,
+              productName: item.productName,
+              quantity: item.quantity,
+              price: item.price,
+            })),
+            payment: {
+              method_code: paymentMethod.code,
+              method_name: paymentMethod.name,
+              subtotal,
+              tax,
+              total,
+              amount_paid: amountPaidNum,
+              change,
+            },
+            client_receipt_number: receiptNumber,
+            settings,
+          },
+        }),
+      })
+
+      if (!receiptRes.ok) {
+        const errorData = await receiptRes.json()
+        console.error("[POS] Failed to save receipt:", errorData.error)
+        // Don't throw error - receipt is optional, order is already saved
+      } else {
+        const receiptData = await receiptRes.json()
+        console.log("[POS] Receipt saved successfully:", receiptData.receipt?.id)
+      }
+
+      // Print receipt if printer connected and auto-print enabled
+      const shouldAutoPrint = settings?.auto_print_receipt ?? true
+      if (printerConnected && shouldAutoPrint) {
+        const printer = getPrinterInstance()
+        const receiptData: ReceiptData = {
+          receiptNumber,
+          orderDate: new Date(),
+          customerName: customerName || undefined,
+          tableNumber: tableNumber || undefined,
+          items: cart.map((item) => ({
+            name: item.productName,
+            quantity: item.quantity,
+            price: item.price,
+            total: item.price * item.quantity,
+          })),
+          subtotal,
+          tax,
+          total,
+          paymentMethod: paymentMethod.name,
+          cashier: session.user.user_metadata?.full_name || session.user.email || "Kasir",
+          restaurantName: settings?.restaurant_name,
+          restaurantAddress: settings?.restaurant_address,
+          restaurantPhone: settings?.restaurant_phone,
+          footerMessage: settings?.receipt_footer,
+          taxRate: settings?.tax_rate,
+        }
+
+        const printed = await printer.printReceipt(receiptData)
+        if (!printed) {
+          toast.error("Gagal mencetak struk", {
+            description: "Pastikan printer terhubung dan siap.",
+          })
+        }
+      }
+
+      // Clear cart
+      clearCart()
+      setIsPaymentDialogOpen(false)
+      toast.success("Pesanan berhasil dibuat")
+    } catch (err: any) {
+      toast.error("Terjadi kesalahan saat checkout", {
+        description: err?.message || "Silakan coba lagi.",
+      })
+    } finally {
+      setProcessingCheckout(false)
+    }
+  }
+
+  const handleQuickAmount = (multiplier: number) => {
+    const roundedAmount = Math.ceil(total / multiplier) * multiplier
+    setAmountPaid(roundedAmount.toString())
   }
 
   const handleConnectPrinter = async () => {
@@ -208,33 +598,28 @@ export default function POSPage() {
       setPrinterConnected(ok)
 
       if (!ok) {
-        // eslint-disable-next-line no-alert
-        alert("Gagal terhubung ke printer. Pastikan printer menyala dan bluetooth aktif.")
+        toast.error("Gagal terhubung ke printer", {
+          description: "Pastikan printer menyala dan bluetooth aktif.",
+        })
+      } else {
+        toast.success("Printer berhasil terhubung")
       }
     } catch {
-      // eslint-disable-next-line no-alert
-      alert("Terjadi kesalahan saat menghubungkan ke printer.")
+      toast.error("Terjadi kesalahan saat menghubungkan ke printer")
     } finally {
       setConnectingPrinter(false)
     }
   }
 
-  return (
-    <>
-      <PaymentModal
-        open={isPaymentModalOpen}
-        onOpenChange={setIsPaymentModalOpen}
-        cart={cart}
-        subtotal={subtotal}
-        tax={tax}
-        total={total}
-        customerName={customerName}
-        tableNumber={tableNumber}
-        orderType={orderType}
-        orderNote={orderNote}
-        onPaymentComplete={handlePaymentComplete}
-      />
+  if (checkingRole) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-muted-foreground text-sm">Memeriksa izin akses...</div>
+      </div>
+    )
+  }
 
+  return (
     <div className="flex h-screen bg-muted/30">
       {/* Products Section */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -246,7 +631,7 @@ export default function POSPage() {
               </Button>
             </Link>
               <div className="flex flex-col">
-            <h1 className="text-2xl font-bold">Cashier POS</h1>
+            <h1 className="text-2xl font-bold">Kasir POS</h1>
                 <p className="text-xs text-muted-foreground">{restaurantName}</p>
               </div>
             </div>
@@ -278,7 +663,7 @@ export default function POSPage() {
                 </div>
           </div>
           <Badge variant="secondary" className="text-sm">
-            {cart.reduce((sum, item) => sum + item.quantity, 0)} items
+            {cart.reduce((sum, item) => sum + item.quantity, 0)} item
           </Badge>
             </div>
         </header>
@@ -290,25 +675,19 @@ export default function POSPage() {
             </div>
           )}
 
-          {successMessage && (
-            <div className="mb-4 flex items-start justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-              <div>
-                <p className="font-semibold">Pembayaran berhasil</p>
-                <p className="text-xs">{successMessage}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSuccessMessage(null)}
-                className="text-xs font-medium text-emerald-900/70 hover:text-emerald-900"
-              >
-                Tutup
-              </button>
+          <div className="mb-4">
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Cari menu..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
             </div>
-          )}
-
-          <Tabs value={selectedCategory} onValueChange={setSelectedCategory} className="mb-6">
+            <Tabs value={selectedCategory} onValueChange={setSelectedCategory}>
             <TabsList className="w-full justify-start">
-              <TabsTrigger value="all">All</TabsTrigger>
+                <TabsTrigger value="all">Semua</TabsTrigger>
               {categories.map((cat) => (
                 <TabsTrigger key={cat.id} value={cat.name}>
                   {cat.name}
@@ -316,35 +695,58 @@ export default function POSPage() {
               ))}
             </TabsList>
           </Tabs>
+          </div>
 
           {loadingData && filteredProducts.length === 0 ? (
             <div className="text-sm text-muted-foreground">Memuat produk dari database...</div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <p className="text-sm">Tidak ada produk ditemukan</p>
+            </div>
           ) : (
-          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {filteredProducts.map((product) => (
               <Card
                 key={product.id}
-                className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => addToCart(product.id, product.name, product.price)}
+                className="cursor-pointer group hover:shadow-lg transition-all duration-200 hover:-translate-y-1 border overflow-hidden"
+                onClick={() => handleProductClick(product)}
               >
-                <CardContent className="p-4">
-                  <div className="aspect-square relative mb-3 rounded-lg overflow-hidden bg-muted">
+                <CardContent className="p-0">
+                  <div className="aspect-square relative overflow-hidden bg-gradient-to-br from-muted to-muted/50">
                       <Image
                         src={product.image || "/placeholder.svg"}
                         alt={product.name}
                         fill
-                        className="object-cover"
+                      className="object-cover group-hover:scale-105 transition-transform duration-300"
                       />
-                  </div>
-                  <h3 className="font-semibold text-sm mb-1 truncate">{product.name}</h3>
-                  <p className="text-xs text-muted-foreground mb-2 line-clamp-1">{product.description}</p>
-                  <div className="flex items-center justify-between">
-                      <span className="text-lg font-bold text-primary">{formatCurrency(product.price)}</span>
                     {!product.available && (
-                      <Badge variant="destructive" className="text-xs">
-                        Out
+                      <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                        <Badge variant="destructive" className="text-xs font-semibold">
+                          Habis
                       </Badge>
+                      </div>
                     )}
+                  </div>
+                  <div className="p-3 space-y-2">
+                    <div>
+                      <h3 className="font-semibold text-sm mb-1 truncate leading-tight group-hover:text-primary transition-colors">{product.name}</h3>
+                      {product.description && (
+                        <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{product.description}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5 pt-1 border-t">
+                      <div className="flex items-center justify-between">
+                        <span className="text-base font-bold text-primary">{formatCurrency(product.price)}</span>
+                      </div>
+                      {product.trackStock && (
+                        <div className="flex items-center gap-1.5">
+                          <div className={`h-2 w-2 rounded-full ${product.stockQuantity > 0 ? "bg-emerald-500" : "bg-red-500"}`} />
+                          <span className="text-xs text-muted-foreground">
+                            Stok: <span className={`font-medium ${product.stockQuantity > 0 ? "text-emerald-600" : "text-red-600"}`}>{product.stockQuantity}</span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -355,123 +757,128 @@ export default function POSPage() {
       </div>
 
       {/* Cart Section */}
-      <div className="w-96 bg-card border-l flex flex-col">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold flex items-center gap-2">
-              <ShoppingCart className="h-5 w-5" />
-              Current Order
+      <div className="w-[460px] bg-card border-l flex flex-col">
+        <div className="p-4 border-b">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <ShoppingCart className="h-4 w-4" />
+              Pesanan Saat Ini
             </h2>
             {cart.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={clearCart}>
-                <X className="h-4 w-4" />
+              <Button variant="ghost" size="sm" onClick={clearCart} className="h-7 w-7">
+                <X className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-2">
             <div className="space-y-1">
-              <Label htmlFor="customer">Customer Name</Label>
+              <Label htmlFor="customer" className="text-xs">Nama Pelanggan</Label>
               <Input
                 id="customer"
-                placeholder="Optional"
+                placeholder="Opsional"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
+                className="h-8 text-sm"
               />
             </div>
+            <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
-              <Label htmlFor="table">Table Number</Label>
+                <Label htmlFor="table" className="text-xs">Nomor Meja</Label>
               <Input
                 id="table"
-                placeholder="Optional"
+                  placeholder="Opsional"
                 value={tableNumber}
                 onChange={(e) => setTableNumber(e.target.value)}
+                  className="h-8 text-sm"
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="order_type">Order Type</Label>
+                <Label htmlFor="order_type" className="text-xs">Tipe Pesanan</Label>
               <Select
                 value={orderType}
                 onValueChange={(value) =>
                   setOrderType(value as "dine_in" | "takeaway" | "gojek" | "grab" | "shopeefood")
                 }
               >
-                <SelectTrigger id="order_type">
+                  <SelectTrigger id="order_type" className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="dine_in">Dine in</SelectItem>
-                  <SelectItem value="takeaway">Takeaway</SelectItem>
+                    <SelectItem value="dine_in">Makan di Tempat</SelectItem>
+                    <SelectItem value="takeaway">Bungkus</SelectItem>
                   <SelectItem value="gojek">Gojek</SelectItem>
                   <SelectItem value="grab">Grab</SelectItem>
                   <SelectItem value="shopeefood">ShopeeFood</SelectItem>
                 </SelectContent>
               </Select>
+              </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="order_note">Order Note</Label>
+              <Label htmlFor="order_note" className="text-xs">Catatan Pesanan</Label>
               <Textarea
                 id="order_note"
                 placeholder="Catatan untuk dapur atau kasir (opsional)"
                 value={orderNote}
                 onChange={(e) => setOrderNote(e.target.value)}
                 rows={2}
+                className="text-sm resize-none"
               />
             </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-auto p-4">
           {cart.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <ShoppingCart className="h-16 w-16 text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">Cart is empty</p>
-              <p className="text-sm text-muted-foreground">Add items to get started</p>
+              <p className="text-muted-foreground">Keranjang kosong</p>
+              <p className="text-sm text-muted-foreground">Tambahkan item untuk memulai</p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-2">
               {cart.map((item) => (
                 <Card key={item.productId} className="border border-muted bg-muted/40">
-                  <CardContent className="p-3 sm:p-4">
-                    <div className="flex items-start justify-between mb-2 sm:mb-3">
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-base leading-snug">{item.productName}</h3>
-                        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                  <CardContent className="p-2.5">
+                    <div className="flex items-start justify-between mb-1.5">
+                      <div className="flex-1 pr-2">
+                        <h3 className="font-medium text-sm leading-snug">{item.productName}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">
                           {formatCurrency(item.price)} / item
                         </p>
                       </div>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-red-600"
+                        className="h-7 w-7 text-muted-foreground hover:text-red-600 shrink-0"
                         onClick={() => removeFromCart(item.productId)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between pt-1 border-t">
+                      <div className="flex items-center gap-1.5">
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-9 w-9 bg-transparent"
+                          className="h-7 w-7 bg-transparent"
                           onClick={() => updateQuantity(item.productId, -1)}
                         >
-                          <Minus className="h-4 w-4" />
+                          <Minus className="h-3.5 w-3.5" />
                         </Button>
-                        <span className="min-w-[2.5rem] text-center font-semibold text-base">
+                        <span className="min-w-[2rem] text-center font-semibold text-sm">
                           {item.quantity}
                         </span>
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-9 w-9 bg-transparent"
+                          className="h-7 w-7 bg-transparent"
                           onClick={() => updateQuantity(item.productId, 1)}
                         >
-                          <Plus className="h-4 w-4" />
+                          <Plus className="h-3.5 w-3.5" />
                         </Button>
                       </div>
-                      <span className="font-semibold text-base sm:text-lg">
+                      <span className="font-semibold text-sm">
                         {formatCurrency(item.price * item.quantity)}
                       </span>
                     </div>
@@ -483,28 +890,236 @@ export default function POSPage() {
         </div>
 
         <div className="p-6 border-t bg-muted/30">
-          <div className="space-y-2 mb-4">
-            <div className="flex justify-between text-sm">
+          <div className="space-y-1.5 mb-4">
+            <div className="flex justify-between text-xs">
               <span className="text-muted-foreground">Subtotal</span>
               <span>{formatCurrency(subtotal)}</span>
             </div>
             {taxRate > 0 && tax > 0 && (
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Pajak ({taxRate}%)</span>
                 <span>{formatCurrency(tax)}</span>
             </div>
             )}
-            <div className="flex justify-between text-lg font-bold pt-2 border-t">
+            <div className="flex justify-between text-sm font-bold pt-1.5 border-t">
               <span>Total</span>
               <span className="text-primary">{formatCurrency(total)}</span>
             </div>
           </div>
-          <Button className="w-full" size="lg" onClick={handleCheckout} disabled={cart.length === 0}>
-            Bayar
+          <Button className="w-full" size="lg" onClick={handleCheckout} disabled={cart.length === 0 || processingCheckout}>
+            {processingCheckout ? "Memproses..." : "Checkout"}
           </Button>
         </div>
+
+        <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Pilih Metode Pembayaran</DialogTitle>
+              <DialogDescription>
+                Pilih metode pembayaran untuk menyelesaikan transaksi
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {loadingPaymentMethods ? (
+                <div className="text-sm text-muted-foreground text-center py-4">Memuat metode pembayaran...</div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="payment-method">Metode Pembayaran</Label>
+                    <Select value={selectedPaymentMethod} onValueChange={setSelectedPaymentMethod}>
+                      <SelectTrigger id="payment-method">
+                        <SelectValue placeholder="Pilih metode pembayaran" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {paymentMethods.map((method) => (
+                          <SelectItem key={method.id} value={method.code}>
+                            {method.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="amount-paid">Jumlah Bayar</Label>
+                    <Input
+                      id="amount-paid"
+                      type="number"
+                      placeholder="0"
+                      value={amountPaid}
+                      onChange={(e) => setAmountPaid(e.target.value)}
+                      min={0}
+                    />
+                    <div className="flex gap-2 flex-wrap">
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAmount(total)}>
+                        Pas
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAmount(10000)}>
+                        Rp 10rb
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAmount(20000)}>
+                        Rp 20rb
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAmount(50000)}>
+                        Rp 50rb
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => handleQuickAmount(100000)}>
+                        Rp 100rb
+                      </Button>
+                    </div>
+                  </div>
+
+                  {Number.parseFloat(amountPaid) > 0 && (
+                    <div
+                      className={`rounded-lg border p-4 ${
+                        Number.parseFloat(amountPaid) >= total
+                          ? "bg-green-50 border-green-200"
+                          : "bg-red-50 border-red-200"
+                      }`}
+                    >
+                      <div className="flex justify-between items-center">
+                        <span
+                          className={`font-semibold ${
+                            Number.parseFloat(amountPaid) >= total ? "text-green-900" : "text-red-900"
+                          }`}
+                        >
+                          Kembalian
+                        </span>
+                        <span
+                          className={`text-xl font-bold ${
+                            Number.parseFloat(amountPaid) >= total ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          {formatCurrency(Math.max(0, Number.parseFloat(amountPaid) - total))}
+                        </span>
+                      </div>
+                      {Number.parseFloat(amountPaid) < total && (
+                        <p className="text-xs text-red-600 mt-1">Uang bayar kurang!</p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsPaymentDialogOpen(false)
+                  setAmountPaid("")
+                }}
+                disabled={processingCheckout}
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={handleProcessCheckout}
+                disabled={!selectedPaymentMethod || processingCheckout || Number.parseFloat(amountPaid || "0") < total}
+              >
+                {processingCheckout ? "Memproses..." : "Proses Pembayaran"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Variant Selection Dialog */}
+        <Dialog open={isVariantDialogOpen} onOpenChange={setIsVariantDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Pilih Varian</DialogTitle>
+              <DialogDescription>
+                {selectedProductForVariant?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {selectedProductForVariant && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Pilih varian (opsional)</Label>
+                    {/* Option for no variant */}
+                    <div
+                      className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
+                        selectedVariantId === null
+                          ? "border-primary bg-primary/5"
+                          : "border-muted hover:border-primary/50"
+                      }`}
+                      onClick={() => setSelectedVariantId(null)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="radio"
+                          checked={selectedVariantId === null}
+                          onChange={() => setSelectedVariantId(null)}
+                          className="h-4 w-4 text-primary"
+                        />
+                        <div>
+                          <div className="font-medium">Tanpa Varian</div>
+                          <div className="text-sm text-muted-foreground">Harga dasar</div>
+                        </div>
+                      </div>
+                      <div className="font-semibold">
+                        {formatCurrency(selectedProductForVariant.price)}
+                      </div>
+                    </div>
+                    {/* Variant options */}
+                    {productVariants[selectedProductForVariant.id]?.map((variant) => (
+                      <div
+                        key={variant.id}
+                        className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
+                          selectedVariantId === variant.id
+                            ? "border-primary bg-primary/5"
+                            : "border-muted hover:border-primary/50"
+                        }`}
+                        onClick={() => setSelectedVariantId(variant.id)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="radio"
+                            checked={selectedVariantId === variant.id}
+                            onChange={() => setSelectedVariantId(variant.id)}
+                            className="h-4 w-4 text-primary"
+                          />
+                          <div>
+                            <div className="font-medium">{variant.name}</div>
+                            {variant.additional_price !== 0 && (
+                              <div className="text-sm text-muted-foreground">
+                                {variant.additional_price > 0 ? "+" : ""}
+                                {formatCurrency(variant.additional_price)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="font-semibold">
+                          {formatCurrency(selectedProductForVariant.price + variant.additional_price)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t">
+                    <span className="font-semibold">Total Harga</span>
+                    <span className="text-lg font-bold text-primary">
+                      {formatCurrency(
+                        selectedProductForVariant.price +
+                          (selectedVariantId
+                            ? productVariants[selectedProductForVariant.id]?.find(v => v.id === selectedVariantId)?.additional_price || 0
+                            : 0)
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsVariantDialogOpen(false)}>
+                Batal
+              </Button>
+              <Button onClick={() => handleConfirmVariantSelection()}>
+                Tambah ke Keranjang
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
-    </>
   )
 }

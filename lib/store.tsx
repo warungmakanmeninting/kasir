@@ -18,6 +18,7 @@ interface StoreContextType {
     note?: string,
   ) => void
   updateOrderStatus: (id: string, status: Order["status"], cancelNote?: string) => void
+  deleteOrder: (id: string) => void
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined)
@@ -146,6 +147,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     )
   }
 
+  const deleteOrder = (id: string) => {
+    setOrders((prev) => prev.filter((o) => o.id !== id))
+  }
+
   return (
     <StoreContext.Provider
       value={{
@@ -157,6 +162,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         deleteProduct,
         createOrder,
         updateOrderStatus,
+        deleteOrder,
       }}
     >
       {children}

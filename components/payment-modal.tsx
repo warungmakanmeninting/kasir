@@ -177,6 +177,8 @@ export function PaymentModal({
           subtotal,
           tax,
           total,
+          amount_paid: amountPaidNum,
+          change_given: change,
         }),
       })
 
