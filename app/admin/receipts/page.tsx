@@ -31,17 +31,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 
 type ReceiptRow = {
   id: string
@@ -65,8 +54,6 @@ export default function ReceiptsPage() {
   const [deletingReceiptId, setDeletingReceiptId] = useState<string | null>(null)
   const [showPrinterConnectConfirm, setShowPrinterConnectConfirm] = useState(false)
   const [pendingReprintReceipt, setPendingReprintReceipt] = useState<ReceiptRow | null>(null)
-  const [deletingReceiptId, setDeletingReceiptId] = useState<string | null>(null)
-  const [showPrinterConnectConfirm, setShowPrinterConnectConfirm] = useState(false)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
