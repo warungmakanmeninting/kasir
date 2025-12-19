@@ -42,26 +42,56 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const limit = Number(searchParams.get("limit") ?? "10")
 
-    // Build query
-    let query = supabase
-      .from("receipts")
-      .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
-      .order("printed_at", { ascending: false })
-      .limit(Number.isFinite(limit) && limit > 0 ? limit : 10)
-
-    // If cashier, only show receipts they printed
-    // Admin and manager can see all receipts
+    // For cashier, get receipts for orders they created
+    // For admin/manager/super_user, get all receipts
     if (userRole === "cashier") {
-      query = query.eq("printed_by", user.id)
+      // First get order IDs created by this cashier
+      const { data: cashierOrders, error: ordersError } = await supabase
+        .from("orders")
+        .select("id")
+        .eq("cashier_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(Number.isFinite(limit) && limit > 0 ? limit : 10)
+
+      if (ordersError) {
+        return NextResponse.json({ error: ordersError.message }, { status: 500 })
+      }
+
+      if (!cashierOrders || cashierOrders.length === 0) {
+        return NextResponse.json({ receipts: [] })
+      }
+
+      const orderIds = cashierOrders.map((o: any) => o.id)
+
+      // Get receipts for these orders (only original receipts)
+      const { data: receipts, error: receiptsError } = await supabase
+        .from("receipts")
+        .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
+        .in("order_id", orderIds)
+        .eq("copy_type", "original")
+        .order("printed_at", { ascending: false })
+        .limit(Number.isFinite(limit) && limit > 0 ? limit : 10)
+
+      if (receiptsError) {
+        return NextResponse.json({ error: receiptsError.message }, { status: 500 })
+      }
+
+      return NextResponse.json({ receipts: receipts ?? [] })
+    } else {
+      // Admin, manager, super_user: show all receipts
+      const { data, error } = await supabase
+        .from("receipts")
+        .select("id, order_id, receipt_number, printed_at, printed_by, copy_type, print_status")
+        .eq("copy_type", "original")
+        .order("printed_at", { ascending: false })
+        .limit(Number.isFinite(limit) && limit > 0 ? limit : 10)
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+
+      return NextResponse.json({ receipts: data ?? [] })
     }
-
-    const { data, error } = await query
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ receipts: data ?? [] })
   } catch (err: any) {
     console.error("[RECEIPTS API] Error in GET:", err)
     return NextResponse.json({ error: err?.message ?? "Unexpected error" }, { status: 500 })

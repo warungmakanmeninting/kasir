@@ -15,6 +15,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: result.error }, { status: result.status })
     }
 
+    // Check write permission (admin is read-only)
+    const userRole = result.role
+    if (userRole === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat mengubah user" }, { status: 403 })
+    }
+
     const { supabase } = result
     const body = await req.json()
     
@@ -34,7 +40,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     }
 
     if (role !== undefined) {
-      if (!["admin", "manager", "cashier", "chef"].includes(role)) {
+      // Check if user can assign this role
+      if (role === "super_user" && userRole !== "super_user") {
+        return NextResponse.json({ error: "Hanya super_user yang dapat mengubah role menjadi super_user" }, { status: 403 })
+      }
+
+      if (!["admin", "manager", "cashier", "chef", "super_user"].includes(role)) {
         return NextResponse.json({ error: "Role tidak valid: " + role }, { status: 400 })
       }
       updates.role = role
@@ -116,6 +127,11 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     const result = await requireAdmin(req)
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: result.status })
+    }
+
+    // Check write permission (admin is read-only)
+    if (result.role === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat menghapus user" }, { status: 403 })
     }
 
     const { supabase, user: currentUser } = result

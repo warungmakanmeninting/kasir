@@ -52,7 +52,7 @@ export default function LoginPage() {
 
       const role = profile.role as string
 
-      if (role === "admin" || role === "manager") {
+      if (role === "admin" || role === "manager" || role === "super_user") {
         router.replace("/admin")
       } else if (role === "cashier") {
         router.replace("/pos")

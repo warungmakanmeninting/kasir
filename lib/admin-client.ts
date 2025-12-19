@@ -39,10 +39,25 @@ export async function requireAdmin(req: NextRequest) {
     return { error: "Profile not found", status: 403 } as const
   }
 
-  if (!profile.is_active || !["admin", "manager"].includes(profile.role)) {
+  if (!profile.is_active || !["admin", "manager", "super_user"].includes(profile.role)) {
     return { error: "Insufficient permissions", status: 403 } as const
   }
 
-  return { supabase, user } as const
+  return { supabase, user, role: profile.role } as const
 }
 
+/**
+ * Require write permission (manager or super_user, not admin)
+ */
+export async function requireWriteAccess(req: NextRequest) {
+  const result = await requireAdmin(req)
+  if ("error" in result) {
+    return result
+  }
+
+  if (result.role === "admin") {
+    return { error: "Admin hanya dapat membaca data, tidak dapat membuat atau mengubah data", status: 403 } as const
+  }
+
+  return result
+}

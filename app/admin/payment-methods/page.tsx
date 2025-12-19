@@ -45,6 +45,7 @@ export default function PaymentMethodsPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all")
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingMethod, setEditingMethod] = useState<PaymentMethodRow | null>(null)
@@ -75,6 +76,17 @@ export default function PaymentMethodsPage() {
         if (!session) {
           setError("Sesi login tidak ditemukan. Silakan login kembali.")
           return
+        }
+
+        // Get current user role
+        const { data: currentProfile } = await supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .single()
+        
+        if (currentProfile) {
+          setCurrentUserRole(currentProfile.role)
         }
 
         const res = await fetch("/api/admin/payment-methods", {
@@ -359,28 +371,31 @@ export default function PaymentMethodsPage() {
                 <Badge variant={m.is_active ? "default" : "secondary"}>{m.is_active ? "Aktif" : "Nonaktif"}</Badge>
               </TableCell>
               <TableCell className="text-right">
-                <div className="inline-flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    title="Edit metode"
-                    onClick={() => openDialog(m)}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <AlertDialog open={deletingMethodId === m.id} onOpenChange={(open) => !open && setDeletingMethodId(null)}>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                        title="Hapus metode"
-                        onClick={() => handleDeleteMethod(m)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </AlertDialogTrigger>
+                {currentUserRole === "admin" ? (
+                  <span className="text-xs text-muted-foreground italic">Read-only</span>
+                ) : (
+                  <div className="inline-flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      title="Edit metode"
+                      onClick={() => openDialog(m)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <AlertDialog open={deletingMethodId === m.id} onOpenChange={(open) => !open && setDeletingMethodId(null)}>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          title="Hapus metode"
+                          onClick={() => handleDeleteMethod(m)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Hapus Metode Pembayaran</AlertDialogTitle>
@@ -396,7 +411,8 @@ export default function PaymentMethodsPage() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
-                </div>
+                  </div>
+                )}
               </TableCell>
             </TableRow>
           ))}

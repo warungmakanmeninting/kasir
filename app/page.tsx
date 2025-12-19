@@ -108,8 +108,8 @@ export default function HomePage() {
 
         {/* Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 md:gap-6 max-w-4xl mx-auto">
-          {/* Cashier POS Card - Show for cashier, admin, and manager */}
-          {(userRole === "cashier" || userRole === "admin" || userRole === "manager") && (
+          {/* Cashier POS Card - Show for cashier, admin, manager, and super_user */}
+          {(userRole === "cashier" || userRole === "admin" || userRole === "manager" || userRole === "super_user") && (
             <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
             <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
@@ -131,8 +131,8 @@ export default function HomePage() {
           </Card>
           )}
 
-          {/* Kitchen Dashboard Card - Show for chef, admin, and manager (if bypass_kitchen_menu is false) */}
-          {settings?.bypass_kitchen_menu !== true && (userRole === "chef" || userRole === "admin" || userRole === "manager") && (
+          {/* Kitchen Dashboard Card - Show for chef, admin, manager, and super_user (if bypass_kitchen_menu is false) */}
+          {settings?.bypass_kitchen_menu !== true && (userRole === "chef" || userRole === "admin" || userRole === "manager" || userRole === "super_user") && (
             <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
               <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
@@ -154,8 +154,8 @@ export default function HomePage() {
           </Card>
           )}
 
-          {/* Admin Dashboard Card - Only show for admin and manager */}
-          {(userRole === "admin" || userRole === "manager") && (
+          {/* Admin Dashboard Card - Show for admin, manager, and super_user */}
+          {(userRole === "admin" || userRole === "manager" || userRole === "super_user") && (
             <Card className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 border hover:border-primary/20">
             <CardHeader className="pb-3 px-4 sm:px-6 pt-4 sm:pt-6">
               <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">

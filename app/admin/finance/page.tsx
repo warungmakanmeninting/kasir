@@ -61,6 +61,7 @@ export default function FinancePage() {
   const [amount, setAmount] = useState("")
   const [notes, setNotes] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
 
   useEffect(() => {
     loadTransactions()
@@ -83,6 +84,17 @@ export default function FinancePage() {
       if (!session) {
         setError("Sesi login tidak ditemukan. Silakan login kembali.")
         return
+      }
+
+      // Get current user role
+      const { data: currentProfile } = await supabaseClient
+        .from("profiles")
+        .select("role")
+        .eq("id", session.user.id)
+        .single()
+      
+      if (currentProfile) {
+        setCurrentUserRole(currentProfile.role)
       }
 
       const res = await fetch("/api/admin/finance", {
@@ -236,8 +248,9 @@ export default function FinancePage() {
       </Card>
 
       {/* Action Buttons */}
-      <div className="flex gap-4 mb-6">
-        <Dialog open={isIncomeDialogOpen} onOpenChange={setIsIncomeDialogOpen}>
+      {currentUserRole !== "admin" && (
+        <div className="flex gap-4 mb-6">
+          <Dialog open={isIncomeDialogOpen} onOpenChange={setIsIncomeDialogOpen}>
           <DialogTrigger asChild>
             <Button
               onClick={() => {
@@ -361,7 +374,8 @@ export default function FinancePage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
+        </div>
+      )}
 
       {/* Transactions Table */}
       <Card>
@@ -422,28 +436,32 @@ export default function FinancePage() {
                     <TableCell>{transaction.notes || "-"}</TableCell>
                     <TableCell>{transaction.createdBy}</TableCell>
                     <TableCell className="text-right">
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
-                            <Trash2 className="h-4 w-4" />
-                            <span className="sr-only">Hapus transaksi</span>
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Hapus Transaksi</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Transaksi ini akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Batal</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(transaction.id)}>
-                              Hapus
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                      {currentUserRole === "admin" ? (
+                        <span className="text-xs text-muted-foreground italic">Read-only</span>
+                      ) : (
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sr-only">Hapus transaksi</span>
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Hapus Transaksi</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Transaksi ini akan dihapus secara permanen. Tindakan ini tidak dapat dibatalkan.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Batal</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDelete(transaction.id)}>
+                                Hapus
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

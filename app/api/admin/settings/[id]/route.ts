@@ -15,6 +15,11 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: result.error }, { status: result.status })
     }
 
+    // Check write permission (admin is read-only)
+    if (result.role === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat mengubah setting" }, { status: 403 })
+    }
+
     const body = await req.json()
     const { value, description, category } = body as {
       value?: string
@@ -60,6 +65,11 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     const result = await requireAdmin(req)
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: result.status })
+    }
+
+    // Check write permission (admin is read-only)
+    if (result.role === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat menghapus setting" }, { status: 403 })
     }
 
     const { error } = await getAdminClient().from("settings").delete().eq("id", id)

@@ -134,7 +134,7 @@ export default function POSPage() {
   useEffect(() => {
     const checkRole = async () => {
       const role = await getUserRole()
-      if (role !== "cashier" && role !== "admin" && role !== "manager") {
+      if (role !== "cashier" && role !== "admin" && role !== "manager" && role !== "super_user") {
         const defaultRoute = getDefaultRouteForRole(role)
         router.replace(defaultRoute)
         return
@@ -179,6 +179,11 @@ export default function POSPage() {
   }, [])
 
   useEffect(() => {
+    // Don't load data until role check is complete
+    if (checkingRole) {
+      return
+    }
+
     const loadData = async () => {
       if (!supabaseClient) {
         setDataError("Konfigurasi Supabase belum lengkap. Hubungi administrator.")
@@ -188,6 +193,18 @@ export default function POSPage() {
       try {
         setLoadingData(true)
         setDataError(null)
+
+        // Check session first
+        const {
+          data: { session },
+        } = await supabaseClient.auth.getSession()
+
+        if (!session) {
+          setDataError("Sesi login tidak ditemukan. Silakan login kembali.")
+          return
+        }
+
+        console.log("[POS] Session found, user:", session.user.email)
 
         // Load settings first to get tax rate and restaurant name
         const settings = await loadSettings()
@@ -213,8 +230,12 @@ export default function POSPage() {
         }
         if (prodRes.error) {
           console.error("[POS] Error loading products:", prodRes.error)
+          console.error("[POS] Products error details:", JSON.stringify(prodRes.error, null, 2))
           throw prodRes.error
         }
+
+        console.log("[POS] Categories loaded:", catRes.data?.length ?? 0)
+        console.log("[POS] Products loaded (raw):", prodRes.data?.length ?? 0, prodRes.data)
 
         // Load variants separately - not critical if it fails
         let variantRes: { data: any[] | null; error: any } = { data: [], error: null }
@@ -242,19 +263,19 @@ export default function POSPage() {
           })),
         )
 
-        setProductRows(
-          (prodRes.data ?? []).map((p: any) => ({
-            id: p.id as string,
-            name: p.name as string,
-            description: (p.description as string | null) ?? null,
-            price: Number(p.price),
-            category_id: (p.category_id as string | null) ?? null,
-            image_url: (p.image_url as string | null) ?? null,
-            is_available: Boolean(p.is_available),
-            stock_quantity: Number(p.stock_quantity || 0),
-            track_stock: Boolean(p.track_stock),
-          })),
-        )
+        const productData = (prodRes.data ?? []).map((p: any) => ({
+          id: p.id as string,
+          name: p.name as string,
+          description: (p.description as string | null) ?? null,
+          price: Number(p.price),
+          category_id: (p.category_id as string | null) ?? null,
+          image_url: (p.image_url as string | null) ?? null,
+          is_available: Boolean(p.is_available),
+          stock_quantity: Number(p.stock_quantity || 0),
+          track_stock: Boolean(p.track_stock),
+        }))
+        console.log("[POS] Loaded products:", productData.length, "items")
+        setProductRows(productData)
 
         // Group variants by product_id
         const variantsByProduct: Record<string, ProductVariant[]> = {}
@@ -286,7 +307,7 @@ export default function POSPage() {
     }
 
     loadData()
-  }, [])
+  }, [checkingRole])
 
   // Cek status koneksi printer saat pertama kali load
   useEffect(() => {
@@ -490,7 +511,7 @@ export default function POSPage() {
     if (!selectedPaymentMethod) {
       toast.error("Pilih metode pembayaran terlebih dahulu")
       return
-    }
+  }
 
     const amountPaidNum = Number.parseFloat(amountPaid) || 0
     if (amountPaidNum < total) {

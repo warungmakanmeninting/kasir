@@ -47,7 +47,7 @@ export default function KitchenPage() {
   useEffect(() => {
     const checkRole = async () => {
       const role = await getUserRole()
-      if (role !== "chef" && role !== "admin" && role !== "manager") {
+      if (role !== "chef" && role !== "admin" && role !== "manager" && role !== "super_user") {
         const defaultRoute = getDefaultRouteForRole(role)
         router.replace(defaultRoute)
         return

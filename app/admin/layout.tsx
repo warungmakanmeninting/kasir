@@ -52,7 +52,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       }
 
       const role = await getUserRole()
-      if (role !== "admin" && role !== "manager") {
+      if (role !== "admin" && role !== "manager" && role !== "super_user") {
         // Redirect to appropriate page based on role
         if (role === "cashier") {
           router.replace("/pos")

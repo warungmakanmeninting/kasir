@@ -1,6 +1,6 @@
 import { supabaseClient } from "./supabaseClient"
 
-export type UserRole = "admin" | "manager" | "cashier" | "chef"
+export type UserRole = "admin" | "manager" | "cashier" | "chef" | "super_user"
 
 /**
  * Get user role from database
@@ -48,8 +48,8 @@ export async function getUserRole(): Promise<UserRole | null> {
 export function canAccessRoute(role: UserRole | null, route: string): boolean {
   if (!role) return false
 
-  // Admin and manager can access everything
-  if (role === "admin" || role === "manager") return true
+  // Super user, manager, and admin can access everything (admin is read-only though)
+  if (role === "super_user" || role === "manager" || role === "admin") return true
 
   // Cashier can only access POS and home
   if (role === "cashier") {
@@ -73,6 +73,7 @@ export function getDefaultRouteForRole(role: UserRole | null): string {
   switch (role) {
     case "admin":
     case "manager":
+    case "super_user":
       return "/admin"
     case "cashier":
       return "/pos"
@@ -81,5 +82,23 @@ export function getDefaultRouteForRole(role: UserRole | null): string {
     default:
       return "/login"
   }
+}
+
+/**
+ * Check if user can write (create, update, delete)
+ * Admin is read-only, manager and super_user have full access
+ */
+export function canWrite(role: UserRole | null): boolean {
+  if (!role) return false
+  return role === "manager" || role === "super_user"
+}
+
+/**
+ * Check if user can create super_user
+ * Only super_user can create another super_user
+ */
+export function canCreateSuperUser(role: UserRole | null): boolean {
+  if (!role) return false
+  return role === "super_user"
 }
 

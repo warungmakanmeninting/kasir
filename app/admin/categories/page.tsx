@@ -44,6 +44,7 @@ export default function CategoriesPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all")
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<CategoryRow | null>(null)
@@ -73,6 +74,17 @@ export default function CategoriesPage() {
         if (!session) {
           setError("Sesi login tidak ditemukan. Silakan login kembali.")
           return
+        }
+
+        // Get current user role
+        const { data: currentProfile } = await supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .single()
+        
+        if (currentProfile) {
+          setCurrentUserRole(currentProfile.role)
         }
 
         const res = await fetch("/api/admin/categories", {
@@ -282,10 +294,12 @@ export default function CategoriesPage() {
             Kelola daftar kategori menu (misalnya Appetizer, Main Course, Dessert, dll).
           </p>
         </div>
-        <Button onClick={() => openDialog()}>
-          <Tags className="h-4 w-4 mr-2" />
-          Tambah Kategori
-        </Button>
+        {currentUserRole !== "admin" && (
+          <Button onClick={() => openDialog()}>
+            <Tags className="h-4 w-4 mr-2" />
+            Tambah Kategori
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -351,28 +365,31 @@ export default function CategoriesPage() {
                 </Badge>
               </TableCell>
               <TableCell className="text-right">
-                <div className="inline-flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    title="Edit kategori"
-                    onClick={() => openDialog(cat)}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <AlertDialog open={deletingCategoryId === cat.id} onOpenChange={(open) => !open && setDeletingCategoryId(null)}>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                        title="Hapus kategori"
-                        onClick={() => handleDeleteCategory(cat)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </AlertDialogTrigger>
+                {currentUserRole === "admin" ? (
+                  <span className="text-xs text-muted-foreground italic">Read-only</span>
+                ) : (
+                  <div className="inline-flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      title="Edit kategori"
+                      onClick={() => openDialog(cat)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <AlertDialog open={deletingCategoryId === cat.id} onOpenChange={(open) => !open && setDeletingCategoryId(null)}>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          title="Hapus kategori"
+                          onClick={() => handleDeleteCategory(cat)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Hapus Kategori</AlertDialogTitle>
@@ -391,7 +408,8 @@ export default function CategoriesPage() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
-                </div>
+                  </div>
+                )}
               </TableCell>
             </TableRow>
           ))}

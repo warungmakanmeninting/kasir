@@ -45,7 +45,8 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
-  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "manager" | "cashier" | "chef">("all")
+  const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "manager" | "cashier" | "chef" | "super_user">("all")
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all")
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -82,6 +83,17 @@ export default function UsersPage() {
         }
 
         setCurrentUserId(session.user.id)
+
+        // Get current user role
+        const { data: currentProfile } = await supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .single()
+        
+        if (currentProfile) {
+          setCurrentUserRole(currentProfile.role)
+        }
 
         const res = await fetch("/api/admin/users", {
           headers: {
@@ -357,10 +369,12 @@ export default function UsersPage() {
             Admin dapat mendaftarkan karyawan baru (kasir, koki, manager, admin) untuk mengakses sistem.
           </p>
         </div>
-        <Button onClick={openDialog}>
-          <Plus className="h-4 w-4 mr-2" />
-          Tambah User
-        </Button>
+        {currentUserRole !== "admin" && (
+          <Button onClick={openDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            Tambah User
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -388,6 +402,7 @@ export default function UsersPage() {
               <SelectItem value="manager">Manager</SelectItem>
               <SelectItem value="cashier">Cashier</SelectItem>
               <SelectItem value="chef">Chef</SelectItem>
+              <SelectItem value="super_user">Super User</SelectItem>
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
@@ -437,6 +452,8 @@ export default function UsersPage() {
               <TableCell className="text-right">
                 {user.id === currentUserId ? (
                   <span className="text-xs text-muted-foreground italic">Akun Anda</span>
+                ) : currentUserRole === "admin" ? (
+                  <span className="text-xs text-muted-foreground italic">Read-only</span>
                 ) : (
                   <div className="inline-flex items-center gap-1">
                     <Button
@@ -579,6 +596,9 @@ export default function UsersPage() {
                     <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="cashier">Cashier</SelectItem>
                     <SelectItem value="chef">Chef</SelectItem>
+                    {currentUserRole === "super_user" && (
+                      <SelectItem value="super_user">Super User</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

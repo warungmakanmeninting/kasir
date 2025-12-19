@@ -57,9 +57,18 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       return NextResponse.json({ error: "Receipt not found" }, { status: 404 })
     }
 
-    // If cashier, only allow access to receipts they printed
-    if (userRole === "cashier" && receipt.printed_by !== user.id) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 })
+    // If cashier, only allow access to receipts for orders they created
+    if (userRole === "cashier") {
+      // Check if order belongs to this cashier
+      const { data: order, error: orderCheckError } = await supabase
+        .from("orders")
+        .select("cashier_id")
+        .eq("id", receipt.order_id)
+        .single()
+
+      if (orderCheckError || !order || order.cashier_id !== user.id) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 })
+      }
     }
 
     // Get order with items and payments
@@ -132,7 +141,7 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
     // Get receipt first to check ownership
     const { data: receipt, error: receiptError } = await supabase
       .from("receipts")
-      .select("printed_by")
+      .select("order_id")
       .eq("id", id)
       .single()
 
@@ -140,9 +149,18 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Receipt not found" }, { status: 404 })
     }
 
-    // If cashier, only allow access to receipts they printed
-    if (userRole === "cashier" && receipt.printed_by !== user.id) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 })
+    // If cashier, only allow access to receipts for orders they created
+    if (userRole === "cashier") {
+      // Check if order belongs to this cashier
+      const { data: order, error: orderCheckError } = await supabase
+        .from("orders")
+        .select("cashier_id")
+        .eq("id", receipt.order_id)
+        .single()
+
+      if (orderCheckError || !order || order.cashier_id !== user.id) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 })
+      }
     }
 
     // Update print status

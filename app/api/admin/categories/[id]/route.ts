@@ -68,6 +68,11 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
       return NextResponse.json({ error: result.error }, { status: result.status })
     }
 
+    // Check write permission (admin is read-only)
+    if (result.role === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat menghapus kategori" }, { status: 403 })
+    }
+
     const supabase = getAdminClient()
 
     const { error } = await supabase.from("categories").delete().eq("id", id)

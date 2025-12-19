@@ -98,6 +98,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dialogError, setDialogError] = useState<string | null>(null)
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
@@ -135,6 +136,22 @@ export default function ProductsPage() {
       try {
         setLoading(true)
         setError(null)
+
+        // Get current user role
+        const {
+          data: { session },
+        } = await supabaseClient.auth.getSession()
+        if (session) {
+          const { data: currentProfile } = await supabaseClient
+            .from("profiles")
+            .select("role")
+            .eq("id", session.user.id)
+            .single()
+          
+          if (currentProfile) {
+            setCurrentUserRole(currentProfile.role)
+          }
+        }
 
         const [catRes, prodRes] = await Promise.all([
           supabaseClient
@@ -558,10 +575,12 @@ export default function ProductsPage() {
           <h1 className="text-3xl font-bold mb-2">Manajemen Produk</h1>
           <p className="text-muted-foreground">Kelola daftar menu restoran yang tersimpan di database Supabase.</p>
         </div>
-        <Button onClick={() => openDialog()}>
-          <Plus className="h-4 w-4 mr-2" />
-          Tambah Produk
-        </Button>
+        {currentUserRole !== "admin" && (
+          <Button onClick={() => openDialog()}>
+            <Plus className="h-4 w-4 mr-2" />
+            Tambah Produk
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -625,23 +644,25 @@ export default function ProductsPage() {
                   <Eye className="h-3.5 w-3.5" />
                   <span className="sr-only">Detail</span>
                 </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="bg-transparent h-7 w-7"
-                  onClick={() => openDialog(product)}
-                  title="Edit"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  <span className="sr-only">Edit</span>
-                </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" size="icon" className="h-7 w-7" title="Hapus">
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span className="sr-only">Hapus produk</span>
+                {currentUserRole !== "admin" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="bg-transparent h-7 w-7"
+                      onClick={() => openDialog(product)}
+                      title="Edit"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      <span className="sr-only">Edit</span>
                     </Button>
-                  </AlertDialogTrigger>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="icon" className="h-7 w-7" title="Hapus">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span className="sr-only">Hapus produk</span>
+                        </Button>
+                      </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>
                       <AlertDialogTitle>Hapus Produk</AlertDialogTitle>
@@ -659,8 +680,10 @@ export default function ProductsPage() {
                         Hapus
                       </AlertDialogAction>
                     </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

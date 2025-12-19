@@ -39,11 +39,11 @@ export async function requireAdmin(req: NextRequest) {
     return { error: "Profile not found", status: 403 } as const
   }
 
-  if (!profile.is_active || !["admin", "manager"].includes(profile.role)) {
+  if (!profile.is_active || !["admin", "manager", "super_user"].includes(profile.role)) {
     return { error: "Insufficient permissions", status: 403 } as const
   }
 
-  return { supabase, user } as const
+  return { supabase, user, role: profile.role } as const
 }
 
 export async function GET(req: NextRequest) {
@@ -90,8 +90,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "email, password, full_name, dan role wajib diisi" }, { status: 400 })
     }
 
-    if (!["admin", "manager", "cashier", "chef"].includes(role)) {
+    // Check if user can create this role
+    const userRole = result.role
+    if (role === "super_user" && userRole !== "super_user") {
+      return NextResponse.json({ error: "Hanya super_user yang dapat membuat super_user" }, { status: 403 })
+    }
+
+    if (!["admin", "manager", "cashier", "chef", "super_user"].includes(role)) {
       return NextResponse.json({ error: "Role tidak valid" }, { status: 400 })
+    }
+
+    // Check write permission (admin is read-only)
+    if (userRole === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat membuat user baru" }, { status: 403 })
     }
 
     const { data, error } = await supabase.auth.admin.createUser({

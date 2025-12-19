@@ -46,6 +46,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingSetting, setEditingSetting] = useState<SettingRow | null>(null)
@@ -75,6 +76,17 @@ export default function SettingsPage() {
         if (!session) {
           setError("Sesi login tidak ditemukan. Silakan login kembali.")
           return
+        }
+
+        // Get current user role
+        const { data: currentProfile } = await supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .single()
+        
+        if (currentProfile) {
+          setCurrentUserRole(currentProfile.role)
         }
 
         const res = await fetch("/api/admin/settings", {
@@ -288,10 +300,12 @@ export default function SettingsPage() {
             Kelola pengaturan aplikasi dan konfigurasi sistem. Perubahan akan diterapkan otomatis di seluruh aplikasi.
           </p>
         </div>
-        <Button onClick={() => openDialog()}>
-          <Plus className="h-4 w-4 mr-2" />
-          Tambah Pengaturan
-        </Button>
+        {currentUserRole !== "admin" && (
+          <Button onClick={() => openDialog()}>
+            <Plus className="h-4 w-4 mr-2" />
+            Tambah Pengaturan
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -350,28 +364,31 @@ export default function SettingsPage() {
                 </span>
               </TableCell>
               <TableCell className="text-right">
-                <div className="inline-flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    className="h-8 w-8"
-                    title="Edit pengaturan"
-                    onClick={() => openDialog(setting)}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <AlertDialog open={deletingSettingId === setting.id} onOpenChange={(open) => !open && setDeletingSettingId(null)}>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                        title="Hapus pengaturan"
-                        onClick={() => handleDeleteSetting(setting)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </AlertDialogTrigger>
+                {currentUserRole === "admin" ? (
+                  <span className="text-xs text-muted-foreground italic">Read-only</span>
+                ) : (
+                  <div className="inline-flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      title="Edit pengaturan"
+                      onClick={() => openDialog(setting)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <AlertDialog open={deletingSettingId === setting.id} onOpenChange={(open) => !open && setDeletingSettingId(null)}>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          title="Hapus pengaturan"
+                          onClick={() => handleDeleteSetting(setting)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Hapus Pengaturan</AlertDialogTitle>
@@ -387,7 +404,8 @@ export default function SettingsPage() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
-                </div>
+                  </div>
+                )}
               </TableCell>
             </TableRow>
           ))}

@@ -32,7 +32,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid access token" }, { status: 401 })
     }
 
-    console.log("[ORDERS API] User authenticated:", user.id)
+    // Check user role - allow cashier, admin, manager, super_user to create orders
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, is_active")
+      .eq("id", user.id)
+      .single()
+
+    if (profileError || !profile || !profile.is_active) {
+      return NextResponse.json({ error: "User profile not found or inactive" }, { status: 403 })
+    }
+
+    const userRole = profile.role
+    // Cashier can create orders, and admin/manager/super_user can also create orders from POS
+    if (!["cashier", "admin", "manager", "super_user"].includes(userRole)) {
+      return NextResponse.json({ error: "Insufficient permissions to create orders" }, { status: 403 })
+    }
+
+    console.log("[ORDERS API] User authenticated:", user.id, "Role:", userRole)
 
     const body = await req.json()
     const { items, customer_name, table_number, order_type, note, payment_method_id, subtotal, tax, total, amount_paid, change_given } = body as {

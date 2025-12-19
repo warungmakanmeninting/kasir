@@ -31,6 +31,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: result.status })
     }
 
+    // Check write permission (admin is read-only)
+    if (result.role === "admin") {
+      return NextResponse.json({ error: "Admin hanya dapat membaca data, tidak dapat membuat setting baru" }, { status: 403 })
+    }
+
     const body = await req.json()
     const { key, value, description, category } = body as {
       key?: string

@@ -27,6 +27,19 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Invalid access token" }, { status: 401 })
     }
 
+    // Check user role - allow chef, admin, manager, super_user to update order status
+    // Cashier can only cancel orders they created
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, is_active")
+      .eq("id", user.id)
+      .single()
+
+    if (profileError || !profile || !profile.is_active) {
+      return NextResponse.json({ error: "Profile not found or inactive" }, { status: 403 })
+    }
+
+    const userRole = profile.role
     const body = await req.json()
     const { status, cancel_note } = body as {
       status?: "pending" | "preparing" | "completed" | "cancelled"
@@ -39,6 +52,35 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 
     if (!["pending", "preparing", "completed", "cancelled"].includes(status)) {
       return NextResponse.json({ error: "Status tidak valid" }, { status: 400 })
+    }
+
+    // If cashier, check if they can only cancel orders they created
+    if (userRole === "cashier") {
+      if (status !== "cancelled") {
+        return NextResponse.json({ error: "Cashier hanya dapat membatalkan pesanan, tidak dapat mengubah status lainnya" }, { status: 403 })
+      }
+
+      // Check if order belongs to this cashier
+      const { data: order, error: orderCheckError } = await supabase
+        .from("orders")
+        .select("cashier_id, status")
+        .eq("id", id)
+        .single()
+
+      if (orderCheckError || !order) {
+        return NextResponse.json({ error: "Order not found" }, { status: 404 })
+      }
+
+      if (order.cashier_id !== user.id) {
+        return NextResponse.json({ error: "Anda hanya dapat membatalkan pesanan yang Anda buat" }, { status: 403 })
+      }
+
+      // Check if order is already completed or cancelled
+      if (order.status === "completed" || order.status === "cancelled") {
+        return NextResponse.json({ error: "Pesanan sudah selesai atau dibatalkan, tidak dapat dibatalkan lagi" }, { status: 400 })
+      }
+    } else if (!["chef", "admin", "manager", "super_user"].includes(userRole)) {
+      return NextResponse.json({ error: "Insufficient permissions to update order status" }, { status: 403 })
     }
 
     // If cancelling, restore stock BEFORE updating order status

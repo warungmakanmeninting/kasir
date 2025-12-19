@@ -54,6 +54,7 @@ export default function ReceiptsPage() {
   const [deletingReceiptId, setDeletingReceiptId] = useState<string | null>(null)
   const [showPrinterConnectConfirm, setShowPrinterConnectConfirm] = useState(false)
   const [pendingReprintReceipt, setPendingReprintReceipt] = useState<ReceiptRow | null>(null)
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [dialogError, setDialogError] = useState<string | null>(null)
@@ -81,6 +82,17 @@ export default function ReceiptsPage() {
         if (!session) {
           setError("Sesi login tidak ditemukan. Silakan login kembali.")
           return
+        }
+
+        // Get current user role
+        const { data: currentProfile } = await supabaseClient
+          .from("profiles")
+          .select("role")
+          .eq("id", session.user.id)
+          .single()
+        
+        if (currentProfile) {
+          setCurrentUserRole(currentProfile.role)
         }
 
         const res = await fetch("/api/admin/receipts?limit=200", {
@@ -427,10 +439,12 @@ export default function ReceiptsPage() {
             Lihat dan kelola riwayat struk yang pernah dicetak. Biasanya data ini bersifat arsip.
           </p>
         </div>
-        <Button onClick={openDialog}>
-          <ReceiptIcon className="h-4 w-4 mr-2" />
-          Tambah Struk Manual
-        </Button>
+        {currentUserRole !== "admin" && (
+          <Button onClick={openDialog}>
+            <ReceiptIcon className="h-4 w-4 mr-2" />
+            Tambah Struk Manual
+          </Button>
+        )}
       </div>
 
       {error && (
