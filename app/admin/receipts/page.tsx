@@ -176,24 +176,6 @@ export default function ReceiptsPage() {
 
     // If printer is ready, proceed with reprint
     try {
-          const printer = getPrinterInstance()
-          isPrinterReady = printer.isConnected()
-          setPrinterConnected(isPrinterReady)
-        } catch {
-          isPrinterReady = false
-        }
-        if (!isPrinterReady) {
-          toast.error("Gagal terhubung ke printer", {
-            description: "Silakan hubungkan printer terlebih dahulu.",
-          })
-          return
-        }
-      } else {
-        return
-      }
-    }
-
-    try {
       setReprintingReceiptId(receipt.id)
       setError(null)
 

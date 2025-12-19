@@ -103,34 +103,34 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="p-5 border-b border-sidebar-border flex-shrink-0 bg-gradient-to-r from-sidebar to-sidebar/95">
             <h1 className="text-xl font-bold text-sidebar-foreground tracking-tight">Panel Admin</h1>
             <p className="text-xs text-sidebar-foreground/70 mt-0.5">Panel Manajemen</p>
-          </div>
+        </div>
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
             <div className="space-y-1.5">
-              {navItems.map((item) => {
-                const Icon = item.icon
-                const isActive = pathname === item.href
-                return (
+          {navItems.map((item) => {
+            const Icon = item.icon
+            const isActive = pathname === item.href
+            return (
                   <Link key={item.href} href={item.href} className="block">
-                    <Button
+                <Button
                       variant="ghost"
-                      className={cn(
+                  className={cn(
                         "w-full justify-start gap-3 rounded-lg transition-all duration-200 h-10 px-3",
                         "text-sm font-medium",
-                        isActive
+                    isActive
                           ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
                           : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-sm",
-                      )}
-                    >
+                  )}
+                >
                       <Icon className="h-4 w-4 shrink-0" />
                       <span className="truncate">{item.label}</span>
-                    </Button>
-                  </Link>
-                )
-              })}
+                </Button>
+              </Link>
+            )
+          })}
             </div>
-          </nav>
+        </nav>
 
           {/* Footer */}
           <div className="p-3 border-t border-sidebar-border flex-shrink-0 bg-sidebar/50">
@@ -141,8 +141,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 <ArrowLeft className="h-4 w-4 shrink-0" />
                 <span className="truncate">Kembali ke Beranda</span>
-              </Button>
-            </Link>
+            </Button>
+          </Link>
           </div>
         </div>
 
