@@ -264,15 +264,15 @@ export default function POSPage() {
         )
 
         const productData = (prodRes.data ?? []).map((p: any) => ({
-          id: p.id as string,
-          name: p.name as string,
-          description: (p.description as string | null) ?? null,
-          price: Number(p.price),
-          category_id: (p.category_id as string | null) ?? null,
-          image_url: (p.image_url as string | null) ?? null,
-          is_available: Boolean(p.is_available),
-          stock_quantity: Number(p.stock_quantity || 0),
-          track_stock: Boolean(p.track_stock),
+            id: p.id as string,
+            name: p.name as string,
+            description: (p.description as string | null) ?? null,
+            price: Number(p.price),
+            category_id: (p.category_id as string | null) ?? null,
+            image_url: (p.image_url as string | null) ?? null,
+            is_available: Boolean(p.is_available),
+            stock_quantity: Number(p.stock_quantity || 0),
+            track_stock: Boolean(p.track_stock),
         }))
         console.log("[POS] Loaded products:", productData.length, "items")
         setProductRows(productData)

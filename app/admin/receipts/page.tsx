@@ -440,10 +440,10 @@ export default function ReceiptsPage() {
           </p>
         </div>
         {currentUserRole !== "admin" && (
-          <Button onClick={openDialog}>
-            <ReceiptIcon className="h-4 w-4 mr-2" />
-            Tambah Struk Manual
-          </Button>
+        <Button onClick={openDialog}>
+          <ReceiptIcon className="h-4 w-4 mr-2" />
+          Tambah Struk Manual
+        </Button>
         )}
       </div>
 

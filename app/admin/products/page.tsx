@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Pencil, Trash2, Search, X, Eye } from "lucide-react"
+import { Plus, Pencil, Trash2, Search, X, Eye, Sparkles } from "lucide-react"
 import Image from "next/image"
 import { Switch } from "@/components/ui/switch"
 import { supabaseClient } from "@/lib/supabaseClient"
@@ -105,6 +105,7 @@ export default function ProductsPage() {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
   const [variants, setVariants] = useState<ProductVariant[]>([])
   const [detailVariants, setDetailVariants] = useState<ProductVariant[]>([])
+  const [generatingDescription, setGeneratingDescription] = useState(false)
 
   const onCropComplete = (_: Area, croppedPixels: Area) => {
     setCroppedAreaPixels(croppedPixels)
@@ -361,6 +362,61 @@ export default function ProductsPage() {
     setIsDetailOpen(false)
     setDetailProduct(null)
     setDetailVariants([])
+  }
+
+  const handleGenerateDescription = async () => {
+    if (!formData.name.trim()) {
+      setDialogError("Nama produk harus diisi terlebih dahulu untuk generate deskripsi")
+      return
+    }
+
+    try {
+      setGeneratingDescription(true)
+      setDialogError(null)
+
+      const categoryName = categories.find((c) => c.id === formData.categoryId)?.name || null
+
+      console.log("[PRODUCTS] Generating description for:", formData.name, categoryName)
+
+      const response = await fetch("/api/generate-description", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          productName: formData.name,
+          categoryName,
+        }),
+      })
+
+      console.log("[PRODUCTS] Generate description response status:", response.status)
+
+      if (!response.ok) {
+        let errorMessage = "Gagal generate deskripsi. Silakan coba lagi."
+        try {
+          const errorData = await response.json()
+          errorMessage = errorData.error || errorMessage
+        } catch (parseError) {
+          // If response is not JSON, try to get text
+          const errorText = await response.text()
+          errorMessage = errorText || errorMessage
+        }
+        throw new Error(errorMessage)
+      }
+
+      const data = await response.json()
+      if (data.description) {
+        setFormData({ ...formData, description: data.description })
+      } else {
+        throw new Error("Deskripsi tidak ditemukan dalam response")
+      }
+    } catch (err: any) {
+      console.error("[PRODUCTS] Error generating description:", err)
+      const errorMessage = err?.message || "Gagal generate deskripsi. Pastikan GEMINI_API_KEY sudah dikonfigurasi dengan benar."
+      setDialogError(errorMessage)
+    } finally {
+      setGeneratingDescription(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -837,13 +893,31 @@ export default function ProductsPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="description">Deskripsi</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="description">Deskripsi</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateDescription}
+                      disabled={generatingDescription || !formData.name.trim()}
+                      className="flex items-center gap-1.5"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      {generatingDescription ? "Generating..." : "Generate AI"}
+                    </Button>
+                  </div>
                   <Textarea
                     id="description"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     required
+                    maxLength={250}
+                    className="resize-none"
                   />
+                  <p className="text-xs text-muted-foreground text-right">
+                    {formData.description.length}/250 karakter
+                  </p>
                 </div>
 
               {/* Availability & stock controls (2 columns) */}

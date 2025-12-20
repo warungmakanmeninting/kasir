@@ -57,7 +57,7 @@ export async function requireWriteAccess(req: NextRequest) {
 
   if (result.role === "admin") {
     return { error: "Admin hanya dapat membaca data, tidak dapat membuat atau mengubah data", status: 403 } as const
-  }
+}
 
   return result
 }

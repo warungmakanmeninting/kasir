@@ -17,16 +17,16 @@ export async function generateMetadata(): Promise<Metadata> {
   
   return {
     title: appName,
-    description: "Modern restaurant point of sale system",
-    generator: "v0.app",
-    icons: {
+  description: "Modern restaurant point of sale system",
+  generator: "v0.app",
+  icons: {
       icon: [
         { url: "/logo.png", type: "image/png" },
         { url: "/favicon.ico", type: "image/x-icon", sizes: "any" },
       ],
       apple: "/logo.png",
       shortcut: "/logo.png",
-    },
+  },
   }
 }
 

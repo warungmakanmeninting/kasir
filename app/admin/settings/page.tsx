@@ -301,10 +301,10 @@ export default function SettingsPage() {
           </p>
         </div>
         {currentUserRole !== "admin" && (
-          <Button onClick={() => openDialog()}>
-            <Plus className="h-4 w-4 mr-2" />
-            Tambah Pengaturan
-          </Button>
+        <Button onClick={() => openDialog()}>
+          <Plus className="h-4 w-4 mr-2" />
+          Tambah Pengaturan
+        </Button>
         )}
       </div>
 
@@ -367,28 +367,28 @@ export default function SettingsPage() {
                 {currentUserRole === "admin" ? (
                   <span className="text-xs text-muted-foreground italic">Read-only</span>
                 ) : (
-                  <div className="inline-flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      title="Edit pengaturan"
-                      onClick={() => openDialog(setting)}
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <AlertDialog open={deletingSettingId === setting.id} onOpenChange={(open) => !open && setDeletingSettingId(null)}>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          title="Hapus pengaturan"
-                          onClick={() => handleDeleteSetting(setting)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </AlertDialogTrigger>
+                <div className="inline-flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Edit pengaturan"
+                    onClick={() => openDialog(setting)}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                  <AlertDialog open={deletingSettingId === setting.id} onOpenChange={(open) => !open && setDeletingSettingId(null)}>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        title="Hapus pengaturan"
+                        onClick={() => handleDeleteSetting(setting)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Hapus Pengaturan</AlertDialogTitle>
@@ -404,7 +404,7 @@ export default function SettingsPage() {
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
-                  </div>
+                </div>
                 )}
               </TableCell>
             </TableRow>
